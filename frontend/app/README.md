@@ -16,6 +16,8 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+For Google sign-in, set `NEXT_PUBLIC_SITE_URL` to the deployed frontend URL in production, for example `https://your-app.example.com`. Add that same URL with a trailing slash to Supabase Authentication > URL Configuration > Redirect URLs, and set the deployed URL as the Site URL. Keep `http://localhost:3000/` in the redirect URLs for local development.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
