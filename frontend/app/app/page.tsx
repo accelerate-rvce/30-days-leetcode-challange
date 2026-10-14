@@ -69,7 +69,7 @@ function Podium({ runner, place }: { runner: typeof runners[number]; place: "fir
 export default function Home() {
   const pathname = usePathname();
   const router = useRouter();
-  const [onboarding, setOnboarding] = useState<OnboardingStage>("loading");
+  const [onboarding, setOnboarding] = useState<OnboardingStage>("app");
   
   // Extract view from pathname, default to overview
   const getViewFromPathname = (pathname: string): View => {
@@ -138,18 +138,15 @@ export default function Home() {
       if (!email) return;
       if (!email.endsWith("@rvce.edu.in")) {
         await client.auth.signOut();
-        setSignInError("Use an RVCE Google account ending in @rvce.edu.in.");
-        setOnboarding("signin");
         return;
       }
       setRvceEmail(email);
-      setOnboarding("waitlist");
     };
     void applySession();
     const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
       const email = session?.user.email?.toLowerCase();
-      if (email?.endsWith("@rvce.edu.in")) { setRvceEmail(email); setOnboarding("waitlist"); }
-      else if (email) { void client.auth.signOut(); setSignInError("Use an RVCE Google account ending in @rvce.edu.in."); setOnboarding("signin"); }
+      if (email?.endsWith("@rvce.edu.in")) setRvceEmail(email);
+      else if (email) void client.auth.signOut();
     });
     return () => subscription.unsubscribe();
   }, []);
