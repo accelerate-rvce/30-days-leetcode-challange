@@ -10,7 +10,7 @@ const VALID_PATHS = new Set([
   "/admin",
 ]);
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (VALID_PATHS.has(pathname)) {
