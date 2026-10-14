@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><title>30 Days LeetCode Challenge — College Edition</title><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base { html, body { margin: 0; padding: 0; } body { overscroll-behavior: none; } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "surface-container": "#1f2020", "surface-container-high": "#292a2a", "on-secondary-fixed": "#1b1c1c", "outline-variant": "#434935", "surface-variant": "#343535", "inverse-surface": "#e3e2e2", "on-primary-fixed-variant": "#374e00", "on-error-container": "#ffdad6", "surface-container-lowest": "#0d0e0f", "on-tertiary": "#313030", "surface-tint": "#a2d824", "secondary": "#c8c6c5", "surface-dim": "#121414", "outline": "#8d937c", "on-secondary": "#303030", "tertiary": "#ffffff", "on-surface": "#e3e2e2", "surface-bright": "#383939", "error-container": "#93000a", "inverse-primary": "#4a6700", "secondary-fixed-dim": "#c8c6c5", "tertiary-fixed": "#e5e2e1", "on-tertiary-fixed-variant": "#474646", "secondary-fixed": "#e5e2e1", "on-primary-container": "#4f6e00", "on-surface-variant": "#c3c9b0", "on-secondary-fixed-variant": "#474746", "on-background": "#e3e2e2", "primary-fixed": "#bcf543", "secondary-container": "#474746", "inverse-on-surface": "#303031", "on-tertiary-fixed": "#1c1b1b", "tertiary-container": "#e5e2e1", "background": "#121414", "surface-container-highest": "#343535", "on-tertiary-container": "#656464", "primary": "#ffffff", "on-error": "#690005", "on-primary-fixed": "#141f00", "primary-fixed-dim": "#a2d824", "surface-container-low": "#1b1c1c", "tertiary-fixed-dim": "#c8c6c5", "on-secondary-container": "#b7b5b4", "on-primary": "#253600", "primary-container": "#bcf543", "surface": "#121414", "error": "#ffb4ab" }, "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, "spacing": { "margin-mobile": "1rem", "space-sm": "0.5rem", "gutter-mobile": "0.75rem", "space-xl": "2.5rem", "gutter": "1rem", "space-lg": "1.5rem", "margin": "2rem", "space-xs": "0.25rem", "space-md": "1rem" }, "fontFamily": { "label-caps": [ "JetBrains Mono" ], "headline-xl": [ "Geist" ], "code-sm": [ "JetBrains Mono" ], "headline-md": [ "Geist" ], "headline-lg": [ "Geist" ], "headline-xl-mobile": [ "Geist" ], "body-md": [ "Inter" ], "code-md": [ "JetBrains Mono" ], "body-lg": [ "Inter" ], "body-sm": [ "Inter" ] }, "fontSize": { "label-caps": [ "10px", { "lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "600" } ], "headline-xl": [ "40px", { "lineHeight": "48px", "letterSpacing": "-0.03em", "fontWeight": "600" } ], "code-sm": [ "11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" } ], "headline-md": [ "20px", { "lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "500" } ], "headline-lg": [ "28px", { "lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "600" } ], "headline-xl-mobile": [ "30px", { "lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "600" } ], "body-md": [ "14px", { "lineHeight": "20px", "letterSpacing": "-0.006em", "fontWeight": "400" } ], "code-md": [ "13px", { "lineHeight": "18px", "letterSpacing": "-0.01em", "fontWeight": "500" } ], "body-lg": [ "16px", { "lineHeight": "24px", "letterSpacing": "-0.011em", "fontWeight": "400" } ], "body-sm": [ "12px", { "lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "400" } ] } } } };</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary"><header class="fixed top-0 left-0 right-0 z-50 bg-surface-container-lowest/90 backdrop-blur-md border-b border-surface-container-high/60"><div class="h-16 w-full px-margin-mobile lg:px-margin flex items-center justify-between gap-gutter"><div class="flex items-center gap-space-md shrink-0"><a class="flex items-center gap-space-sm group" data-path="home" href="#"><img alt="30DAYS Brand Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1XfB4tsNhHzz7jCLZFj4X6IwdPYEtyGEAt511s8uQH6aUR4QxhS1ONSrkwYUr9YaOZo56VMM_VLOP4MHf1hb-6cik5W0fGsKyMpYHO7n7MQePS_2xhi3YhWIOw1ZcpKs3-XlPAIKkjnb-VOLAb4Gco7XgDZvUVKz-fAx5_2cll5h40QcUH8G-1PCweRpG9Ve15KtYlPswSY_NvdK7VdsmmFv0NX7AZQoCLBxkhFzF-9iYw2i97knhQZFg"/><div class="flex flex-col"><span class="font-label-caps text-label-caps uppercase tracking-wider text-primary">30DAYS</span><span class="font-code-sm text-code-sm text-on-surface-variant group-hover:text-primary transition-colors">COLLEGE</span></div></a><div class="hidden sm:flex items-center gap-space-xs px-space-sm py-1 rounded-full bg-surface-container-low border border-outline-variant/40"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-fixed opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-primary-fixed"></span></span><span class="font-label-caps text-label-caps uppercase text-primary-fixed">TODAY'S QUESTION IS LIVE</span><span class="font-code-sm text-code-sm text-secondary-fixed-dim border-l border-surface-container-high pl-1.5 ml-0.5">Day 07/30</span></div></div><nav class="hidden md:flex items-center gap-space-xs p-1 rounded bg-surface-container-lowest border border-surface-container-high/40" data-active-classes="bg-surface-container-high text-primary font-medium rounded"><a class="px-space-md py-1.5 font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low rounded transition-colors" data-path="home" href="#">Home</a><a class="px-space-md py-1.5 font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low rounded transition-colors" data-path="daily-challenge" href="#">Daily Challenge</a><a aria-current="page" class="px-space-md py-1.5 transition-colors bg-surface-container-high text-primary font-medium rounded" data-path="leaderboard" href="#">Leaderboard</a><a class="px-space-md py-1.5 font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low rounded transition-colors" data-path="my-progress" href="#">My Progress</a></nav><div class="flex items-center gap-space-md shrink-0"><div class="flex items-center gap-1.5 px-space-sm py-1 rounded-full bg-surface-container-low border border-outline-variant/50 shadow-sm"><span class="font-code-sm text-code-sm leading-none">🔥</span><span class="font-code-sm text-code-sm text-primary-fixed font-semibold">7</span><span class="font-code-sm text-code-sm text-on-surface-variant hidden sm:inline">Streak</span></div><button aria-label="Notifications" class="relative p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button"><span class="material-symbols-outlined text-[20px] leading-none">notifications</span><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary-fixed rounded-full"></span></button><div class="flex items-center gap-space-sm pl-space-xs border-l border-surface-container-high/60 cursor-pointer group"><div class="relative"><img alt="Profile" class="w-8 h-8 rounded-full object-cover ring-1 ring-outline-variant/50 group-hover:ring-primary-fixed transition-all" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCgjZOzHXNHgZFLmyCVwAuEP2RcWZmHutpISuTnaeWsGf6pFyz6Zzi9BtRMhrCjJYC_Tp9xl6J__W0D7Ab9p8ND-XZF8czUsKq5HEr60IO40DEk9C2K905JPXBflpRPqOb2dXpaxQaNFu4ykxxlzthbg7egN9cu7uPCoe3eQmojnmJKQvV2rr5ux99BVcCTMxFFpi5e1cOOjvbugC2rzE0M_nYBertsEW5onDa4M7p2kH_dIeTnJYPS"/></div><div class="hidden xl:flex flex-col text-left"><span class="font-code-sm text-code-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-tight">arjun.sharma</span><span class="font-label-caps text-label-caps text-on-surface-variant uppercase leading-tight">3rd Year CSE</span></div><span class="material-symbols-outlined text-on-surface-variant group-hover:text-on-surface text-[18px] transition-transform group-hover:translate-y-0.5">expand_more</span></div></div></div></header><main class="w-full pt-16 flex-1 bg-surface"><div class="flex flex-col w-full">
+<!-- Subtle decorative ambient background glows contained in relative canvas -->
+<div class="relative w-full overflow-hidden px-margin-mobile lg:px-margin py-space-lg flex flex-col gap-space-xl">
+<!-- Ambient Glow Top Right -->
+<div class="absolute top-0 right-1/4 w-96 h-96 bg-primary-container/5 rounded-full blur-3xl pointer-events-none -z-10"></div>
+<div class="absolute top-48 left-10 w-72 h-72 bg-surface-container-high/40 rounded-full blur-2xl pointer-events-none -z-10"></div>
+<!-- Header & Live Ticker Section -->
+<div class="flex flex-col lg:flex-row lg:items-end justify-between gap-space-md">
+<div class="flex flex-col max-w-3xl">
+<div class="flex items-center gap-space-sm mb-space-xs">
+<span class="w-2 h-2 rounded-full bg-primary-fixed animate-pulse"></span>
+<span class="font-label-caps text-label-caps uppercase text-primary-fixed tracking-widest">PLACEMENT READINESS INDEX</span>
+<span class="text-outline-variant font-code-sm text-code-sm">•</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">SEASON 02 · 2025</span>
+</div>
+<h1 class="font-headline-xl text-headline-xl text-primary tracking-tight uppercase">THE LEADERBOARD</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant mt-1">Consistency wins. Every solved question counts.</p>
+<p class="font-body-sm text-body-sm text-secondary-fixed-dim/80 mt-1 max-w-2xl">
+          Scores update as submissions are verified by backend sync. Pending verifications do not count toward points.
+        </p>
+</div>
+<!-- Quick Action / Auto Sync Status -->
+<div class="flex items-center gap-space-sm bg-surface-container-low px-space-md py-space-sm rounded-lg self-start lg:self-end shadow-sm">
+<div class="flex flex-col text-right">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">LEETCODE SYNC POLLER</span>
+<span class="font-code-sm text-code-sm text-primary font-semibold flex items-center gap-1 justify-end">
+<span class="inline-block w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> ACTIVE · CRON ID #8841
+          </span>
+</div>
+<button class="p-2 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface hover:text-primary transition-all active:scale-95 ml-2" id="refreshSyncBtn" title="Manual Sync Query">
+<span class="material-symbols-outlined text-[18px]">sync</span>
+</button>
+</div>
+</div>
+<!-- Top Metrics Strip (Bento-style 4 metrics cards) -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
+<!-- Metric 1 -->
+<div class="bg-surface-container-low p-space-md rounded-xl flex flex-col justify-between shadow-sm relative overflow-hidden group">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant">CAMPAIGN CADENCE</span>
+<span class="material-symbols-outlined text-outline text-[18px]">event_available</span>
+</div>
+<div class="mt-space-md">
+<div class="flex items-baseline gap-space-xs">
+<span class="font-headline-lg text-headline-lg text-primary tracking-tight">DAY 07</span>
+<span class="font-code-md text-code-md text-on-surface-variant">/ 30</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full mt-2 overflow-hidden">
+<div class="bg-primary-fixed h-full rounded-full transition-all duration-700" style="width: 23.3%;"></div>
+</div>
+</div>
+<span class="font-code-sm text-code-sm text-secondary-fixed-dim mt-space-xs">23 days remaining in current cohort</span>
+</div>
+<!-- Metric 2 -->
+<div class="bg-surface-container-low p-space-md rounded-xl flex flex-col justify-between shadow-sm relative overflow-hidden">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant">ACTIVE CHALLENGERS</span>
+<span class="material-symbols-outlined text-outline text-[18px]">group</span>
+</div>
+<div class="mt-space-md">
+<div class="flex items-baseline gap-space-xs">
+<span class="font-headline-lg text-headline-lg text-primary tracking-tight">428</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Students</span>
+</div>
+<div class="flex items-center gap-space-xs mt-2">
+<span class="font-code-sm text-code-sm text-primary-fixed font-medium">98.4%</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">submission rate week 1</span>
+</div>
+</div>
+<span class="font-code-sm text-code-sm text-secondary-fixed-dim mt-space-xs">4 Engineering branches enrolled</span>
+</div>
+<!-- Metric 3 -->
+<div class="bg-surface-container-low p-space-md rounded-xl flex flex-col justify-between shadow-sm relative overflow-hidden">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant">DAY 07 COMPLETIONS</span>
+<span class="material-symbols-outlined text-primary-fixed text-[18px]">verified</span>
+</div>
+<div class="mt-space-md">
+<div class="flex items-baseline gap-space-xs">
+<span class="font-headline-lg text-headline-lg text-primary tracking-tight">184</span>
+<span class="font-code-md text-code-md text-on-surface-variant">/ 428 Solved</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full mt-2 overflow-hidden">
+<div class="bg-primary-fixed h-full rounded-full transition-all duration-700" style="width: 43%;"></div>
+</div>
+</div>
+<span class="font-code-sm text-code-sm text-secondary-fixed-dim mt-space-xs">43% verified · 49 in evaluation pipeline</span>
+</div>
+<!-- Metric 4 -->
+<div class="bg-surface-container-low p-space-md rounded-xl flex flex-col justify-between shadow-sm relative overflow-hidden">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant">SYSTEM STATE</span>
+<span class="material-symbols-outlined text-outline text-[18px]">update</span>
+</div>
+<div class="mt-space-md">
+<div class="flex items-baseline gap-space-xs">
+<span class="font-headline-md text-headline-md text-primary font-semibold">19:24 IST</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Today</span>
+</div>
+<div class="flex items-center gap-1.5 mt-2">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Auto-syncs every 5 mins</span>
+</div>
+</div>
+<span class="font-code-sm text-code-sm text-secondary-fixed-dim mt-space-xs">Next trigger in ~3m 12s</span>
+</div>
+</div>
+<!-- Podium Section (Top 3 Modern Architecture) -->
+<div class="flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="font-label-caps text-label-caps uppercase text-primary font-semibold tracking-wider">TOP THREE RUNNERS</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-high text-on-surface-variant font-code-sm text-code-sm">CURRENT SPLIT</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant hidden md:inline">Tier 1 Placement Shortlist Qualifiers</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter items-end">
+<!-- Podium: Rank 2 (Silver) -->
+<div class="order-2 md:order-1 bg-surface-container-low p-space-lg rounded-xl shadow-md flex flex-col justify-between relative group hover:bg-surface-container transition-all">
+<div class="absolute top-0 left-0 right-0 h-1 bg-secondary rounded-t-xl opacity-80"></div>
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="w-8 h-8 rounded-lg bg-surface-container-high text-secondary flex items-center justify-center font-code-md text-code-md font-bold shadow-inner">02</span>
+<span class="font-label-caps text-label-caps uppercase text-secondary">SILVER TIER</span>
+</div>
+<div class="flex items-center gap-1 text-on-surface-variant font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[16px]">horizontal_rule</span>
+<span>PAR</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md my-space-lg">
+<img class="w-16 h-16 rounded-xl object-cover ring-2 ring-secondary/30" data-alt="Close up modern software engineering student portrait with dark studio lighting and subtle grey rim light, professional avatar style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDVbBuRBFP6ngVbL2ULVXIUXyH0GlCnlxOeEkSma4r6MDVMuRYQlSIp4WExrJt3TW8kOhTk-8O203N1uj8IQevSTYi7m9Y633IpuUOkCL-18Z95bY35NxTr-_mytBCG-oIf60zChJQkbHIEciFPUJvg93bD3c6EQfWdmfh0VL_mbFhtwXb42MpiGiXpRtWKYs6x6nxU6pbTs1MC5Czb7u4zuI2Ywdeh3bbkGHnX2Kzo_z2C2szzpiFu"/>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-md text-headline-md text-primary font-semibold truncate">Devansh Mehta</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant truncate">3rd Year CSE · Roll #22CS089</span>
+<a class="font-code-sm text-code-sm text-secondary-fixed-dim hover:text-primary transition-colors flex items-center gap-1 mt-0.5" href="#">
+<span class="material-symbols-outlined text-[14px]">terminal</span> @devansh_m
+              </a>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-space-xs bg-surface-container-lowest p-space-sm rounded-lg text-center">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">SOLVED</span>
+<span class="font-code-md text-code-md text-primary font-bold">7/7</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">STREAK</span>
+<span class="font-code-md text-code-md text-primary font-bold">🔥 7d</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">SCORE</span>
+<span class="font-code-md text-code-md text-primary-fixed font-bold">210 pts</span>
+</div>
+</div>
+</div>
+<!-- Podium: Rank 1 (Gold Accent / Center Height) -->
+<div class="order-1 md:order-2 bg-surface-container p-space-lg rounded-xl shadow-xl flex flex-col justify-between relative group hover:bg-surface-container-high transition-all -translate-y-0 md:-translate-y-3">
+<div class="absolute top-0 left-0 right-0 h-1.5 bg-primary-fixed rounded-t-xl"></div>
+<div class="absolute -top-3.5 right-6 bg-primary-fixed text-on-primary px-3 py-0.5 rounded font-label-caps text-label-caps uppercase font-bold tracking-wider shadow-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] leading-none">military_tech</span> #1 LEADER
+          </div>
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="w-9 h-9 rounded-lg bg-primary-fixed text-on-primary flex items-center justify-center font-code-md text-code-md font-extrabold shadow-sm">01</span>
+<div>
+<span class="font-label-caps text-label-caps uppercase text-primary-fixed tracking-wider block">GOLD MEDALIST</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Highest Execution Speed</span>
+</div>
+</div>
+<div class="flex items-center gap-1 text-primary-fixed font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[16px]">arrow_upward</span>
+<span class="font-bold">▲ 1</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md my-space-lg">
+<div class="relative shrink-0">
+<img class="w-20 h-20 rounded-xl object-cover ring-2 ring-primary-fixed/60" data-alt="Empowered female Indian engineering student smiling with focus, dark high contrast coding tech workspace background, high detailed editorial photo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAebL6GPucmSCvte8Muw8YX-K0hOAtk2dXYrDaOhBA50O2n5RA5tPfZdksPbGKo_Knu74GLnrvVlaf3Zv7uc650Tg4gmLf6Labo_BoDPhWLXA3kteIvJxAToR-6GMMu34dvkzWK0djn4KuyShO9U1fae77b7RI1xsxlRY2Q9Z_F-yeZBLgNx3LJMc2ZiZxxXScMtuHzKMTqCBqtoMUqwYZgpcJ97-WsBfgbxlyQPoQFR5bRgm7qQXIf"/>
+<span class="absolute -bottom-1 -right-1 bg-surface-container-lowest p-1 rounded-full text-primary-fixed flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px]">verified</span>
+</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-lg text-headline-lg text-primary font-bold truncate">Priya Nair</span>
+<span class="font-body-md text-body-md text-on-surface-variant truncate">4th Year IT · Roll #21IT014</span>
+<a class="font-code-sm text-code-sm text-primary-fixed hover:underline flex items-center gap-1 mt-1 font-semibold" href="#">
+<span class="material-symbols-outlined text-[14px]">code</span> @priya_tech
+              </a>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-space-xs bg-surface-container-lowest p-space-sm rounded-lg text-center shadow-inner">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">SOLVED</span>
+<span class="font-code-md text-code-md text-primary font-bold">7/7</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">STREAK</span>
+<span class="font-code-md text-code-md text-primary font-bold">🔥 7d</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">SCORE</span>
+<span class="font-code-md text-code-md text-primary-fixed font-extrabold">210 pts</span>
+</div>
+</div>
+</div>
+<!-- Podium: Rank 3 (Bronze Accent) -->
+<div class="order-3 md:order-3 bg-surface-container-low p-space-lg rounded-xl shadow-md flex flex-col justify-between relative group hover:bg-surface-container transition-all">
+<div class="absolute top-0 left-0 right-0 h-1 bg-outline rounded-t-xl opacity-80"></div>
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="w-8 h-8 rounded-lg bg-surface-container-high text-outline flex items-center justify-center font-code-md text-code-md font-bold shadow-inner">03</span>
+<span class="font-label-caps text-label-caps uppercase text-outline">BRONZE TIER</span>
+</div>
+<div class="flex items-center gap-1 text-error font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[16px]">arrow_downward</span>
+<span>▼ 1</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md my-space-lg">
+<img class="w-16 h-16 rounded-xl object-cover ring-2 ring-outline/30" data-alt="Male computer science student in front of dual monitors with dark terminal themes, natural focused developer portrait, photorealistic lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAvUOV18QiCumFd16WlgItxM0RNMC4A36v77np6zFLcCPF_21I90CXz3Rpuf1oo6ZGQNnrav0Bo9EP5hRXk_MFa7zh0TyJMhIuIk_Y2Qnw1OO4LLBiUiR-V7Q7DdjMvPb0Ab57eJGPpccuiKEumFAAyxHNCoeltj_pLXyhYG3ohbHqOOSpQOCEEle_L3rAIQ3NcgsKuMutrWUaS3r_muov25ubl1YBLqGh710FNIHOFxpyKmX-D63Wt"/>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-md text-headline-md text-primary font-semibold truncate">Rohan Varma</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant truncate">4th Year CSE · Roll #21CS102</span>
+<a class="font-code-sm text-code-sm text-secondary-fixed-dim hover:text-primary transition-colors flex items-center gap-1 mt-0.5" href="#">
+<span class="material-symbols-outlined text-[14px]">terminal</span> @rohan_v
+              </a>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-space-xs bg-surface-container-lowest p-space-sm rounded-lg text-center">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">SOLVED</span>
+<span class="font-code-md text-code-md text-primary font-bold">7/7</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">STREAK</span>
+<span class="font-code-md text-code-md text-primary font-bold">🔥 7d</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">SCORE</span>
+<span class="font-code-md text-code-md text-primary-fixed font-bold">205 pts</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Search, Filters, and My Rank Quick-Jump Bar -->
+<div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-space-md bg-surface-container-low p-space-md rounded-xl shadow-sm">
+<!-- Search Input -->
+<div class="relative flex-1">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
+<input class="w-full pl-10 pr-4 py-2.5 bg-surface-container-lowest text-on-surface font-body-md text-body-md rounded-lg placeholder:text-outline/70 focus:outline-none focus:ring-1 focus:ring-primary-fixed transition-all" id="studentSearchInput" placeholder="Search by student name, roll number, or LeetCode handle..." type="text"/>
+<span class="hidden sm:inline absolute right-3 top-1/2 -translate-y-1/2 font-code-sm text-code-sm text-outline-variant bg-surface-container-high px-1.5 py-0.5 rounded">⌘K</span>
+</div>
+<!-- Filters & Jump Toggle -->
+<div class="flex flex-wrap items-center gap-space-sm shrink-0">
+<!-- Academic Year Filter Pills -->
+<div class="flex items-center gap-1 bg-surface-container-lowest p-1 rounded-lg" id="yearFilterGroup">
+<button class="px-space-sm py-1 rounded font-code-sm text-code-sm font-semibold bg-surface-container-high text-primary transition-all" data-filter="all">All Years</button>
+<button class="px-space-sm py-1 rounded font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-all" data-filter="1">1st Year</button>
+<button class="px-space-sm py-1 rounded font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-all" data-filter="2">2nd Year</button>
+<button class="px-space-sm py-1 rounded font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-all" data-filter="3">3rd Year</button>
+<button class="px-space-sm py-1 rounded font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-all" data-filter="4">4th Year</button>
+</div>
+<!-- Jump to My Rank Pill Button -->
+<button class="flex items-center gap-space-xs px-space-md py-2 rounded-lg bg-surface-container-high hover:bg-surface-variant text-primary-fixed font-code-sm text-code-sm font-semibold transition-all shadow-sm group" id="jumpToMyRankBtn">
+<span class="material-symbols-outlined text-[16px] text-primary-fixed group-hover:animate-bounce">my_location</span>
+<span>Show My Rank (#14)</span>
+</button>
+</div>
+</div>
+<!-- Leaderboard Table Section -->
+<div class="w-full bg-surface-container-low rounded-xl shadow-md overflow-hidden flex flex-col">
+<!-- Table Header Bar -->
+<div class="overflow-x-auto w-full">
+<table class="w-full text-left border-collapse min-w-[960px]">
+<thead>
+<tr class="bg-surface-container-lowest text-on-surface-variant font-label-caps text-label-caps uppercase tracking-wider">
+<th class="py-3 px-space-md w-20 text-center">RANK</th>
+<th class="py-3 px-space-md">STUDENT &amp; COLLEGE ID</th>
+<th class="py-3 px-space-md">ACADEMIC YEAR</th>
+<th class="py-3 px-space-md">LEETCODE HANDLE</th>
+<th class="py-3 px-space-md text-center">QUESTIONS SOLVED</th>
+<th class="py-3 px-space-md text-center">STREAK</th>
+<th class="py-3 px-space-md text-right">POINTS</th>
+<th class="py-3 px-space-md text-center">STATUS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container-high/40 font-body-sm text-body-sm">
+<!-- Row 1: Priya Nair -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-bold text-primary-fixed">01</span>
+<span class="font-code-sm text-code-sm text-primary-fixed flex items-center" title="Moved up 1 place">▲1</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">PN</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Priya Nair</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">21IT014 · College of Computing</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">4th Year IT</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-primary-fixed hover:underline flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @priya_tech
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">7/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 7
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary-fixed">210 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+<!-- Row 2: Devansh Mehta -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-bold text-secondary">02</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant" title="No change in rank">=</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">DM</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Devansh Mehta</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">22CS089 · Dept of Computer Science</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">3rd Year CSE</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @devansh_m
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">7/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 7
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary">210 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+<!-- Row 3: Rohan Varma -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-bold text-outline">03</span>
+<span class="font-code-sm text-code-sm text-error flex items-center" title="Moved down 1 place">▼1</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">RV</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Rohan Varma</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">21CS102 · Dept of Computer Science</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">4th Year CSE</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @rohan_v
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">7/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 7
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary">205 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+<!-- Row 4: Sneha Kulkarni -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-semibold text-on-surface">04</span>
+<span class="font-code-sm text-code-sm text-primary-fixed flex items-center" title="Moved up 3 places">▲3</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">SK</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Sneha Kulkarni</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">22CS144 · Dept of Computer Science</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">3rd Year CSE</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @sneha_k
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">7/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 7
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary">200 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+<!-- Row 5: Kabir Sen -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-semibold text-on-surface">05</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant" title="No change in rank">=</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">KS</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Kabir Sen</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">23EC031 · Electronics &amp; Communication</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">2nd Year ECE</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @kabir_codes
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">7/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 7
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary">195 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+<!-- Truncation / Gap Indicator -->
+<tr class="bg-surface-container-lowest/50">
+<td class="py-2 px-space-md text-center font-label-caps text-label-caps uppercase text-outline tracking-widest" colspan="8">
+                ••• 8 INTERMEDIATE COMPETITOR TIERS TRUNCATED •••
+              </td>
+</tr>
+<!-- HIGHLIGHTED ROW FOR LOGGED-IN STUDENT (Rank 14: Arjun Sharma) -->
+<tr class="bg-primary-container/10 hover:bg-primary-container/15 transition-all relative shadow-sm" id="myRankRow">
+<td class="py-4 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-extrabold text-primary-fixed">14</span>
+<span class="font-code-sm text-code-sm text-primary-fixed font-bold flex items-center" title="Moved up 2 places">▲2</span>
+</div>
+</td>
+<td class="py-4 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="relative shrink-0">
+<img class="w-9 h-9 rounded-full object-cover" data-alt="Close up face profile of Arjun Sharma, collegiate software developer with focused expression in terminal screen glow, sharp modern photo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA4wozSaOubabX9sM-JsbV2nHPbZrgWpx9etIHkc5iY17M0vq-cANSNL0-WnbjKa5nfRfx18blvRNheVy0MO7H8Dlyxb3j_uapQtnUwbSd3JLa0CsFyKKhis5TLmykPettBTb6Nc5sX0H_attwGeG-mADkdsan8rKPBov3Dy_HCicqvZAK0iOt-1eSiWm1GbCSUDrOknZFtDxibfWi4MFN7f245VpwlRD290kLI3WM8CnY0sLjB4cSC"/>
+<span class="absolute -top-1 -right-1 bg-primary-fixed text-on-primary text-[9px] font-extrabold px-1 rounded-sm leading-none py-0.5">YOU</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<span class="font-body-md text-body-md font-bold text-primary">Arjun Sharma</span>
+<span class="px-1.5 py-0.2 rounded bg-primary-fixed text-on-primary font-label-caps text-label-caps uppercase">CURRENT SESSION</span>
+</div>
+<span class="font-code-sm text-code-sm text-primary-fixed/80">22CS051 · Dept of Computer Science</span>
+</div>
+</div>
+</td>
+<td class="py-4 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-primary font-code-sm text-code-sm font-semibold">3rd Year CSE</span>
+</td>
+<td class="py-4 px-space-md">
+<a class="font-code-sm text-code-sm text-primary-fixed hover:underline flex items-center gap-1 font-semibold" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @arjun_codes
+                </a>
+</td>
+<td class="py-4 px-space-md text-center">
+<div class="flex flex-col items-center">
+<span class="font-code-md text-code-md font-bold text-primary">6/7</span>
+<span class="font-code-sm text-code-sm text-secondary-fixed-dim">(1 Pending)</span>
+</div>
+</td>
+<td class="py-4 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high font-code-sm text-code-sm text-primary-fixed font-bold">
+<span>🔥</span> 7
+                </div>
+</td>
+<td class="py-4 px-space-md text-right">
+<div class="flex flex-col items-end">
+<span class="font-code-md text-code-md font-extrabold text-primary-fixed">180 pts</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">+30 pts upon sync</span>
+</div>
+</td>
+<td class="py-4 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-secondary-fixed-dim font-label-caps text-label-caps uppercase font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed-dim animate-ping"></span> ⏳ Verification Pending
+                </span>
+</td>
+</tr>
+<!-- Row 15: Tanvi Joshi -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-semibold text-on-surface">15</span>
+<span class="font-code-sm text-code-sm text-error flex items-center" title="Moved down 2 places">▼2</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">TJ</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Tanvi Joshi</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">22IT045 · College of Computing</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">3rd Year IT</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @tanvi_j
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">6/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 6
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary">175 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+<!-- Row 16: Aniket Gupta -->
+<tr class="hover:bg-surface-container/60 transition-colors group">
+<td class="py-3.5 px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<span class="font-code-md text-code-md font-semibold text-on-surface">16</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant" title="No change in rank">=</span>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<div class="flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-code-sm text-code-sm text-primary font-semibold shrink-0">AG</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary group-hover:text-primary-fixed transition-colors">Aniket Gupta</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">23CS119 · Dept of Computer Science</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-space-md">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-code-sm text-code-sm">2nd Year CSE</span>
+</td>
+<td class="py-3.5 px-space-md">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span> @aniket_g
+                </a>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="font-code-md text-code-md font-semibold text-primary">6/7</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container font-code-sm text-code-sm text-primary font-medium">
+<span>🔥</span> 6
+                </div>
+</td>
+<td class="py-3.5 px-space-md text-right">
+<span class="font-code-md text-code-md font-bold text-primary">170 pts</span>
+</td>
+<td class="py-3.5 px-space-md text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-label-caps text-label-caps uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> Verified
+                </span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Bottom Pagination / Controls -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-space-md p-space-md bg-surface-container-lowest border-t-0">
+<div class="flex items-center gap-space-sm text-on-surface-variant font-code-sm text-code-sm">
+<span>Showing <strong class="text-primary font-semibold">1–25</strong> of <strong class="text-primary font-semibold">428</strong> participants</span>
+<span class="hidden md:inline text-outline-variant">•</span>
+<span class="hidden md:inline">Sorted by verified total points, then submission latency</span>
+</div>
+<!-- Pagination Controls -->
+<div class="flex items-center gap-1">
+<button class="px-space-sm py-1.5 rounded bg-surface-container-high text-on-surface-variant hover:text-primary hover:bg-surface-variant font-code-sm text-code-sm flex items-center gap-1 transition-all disabled:opacity-40" disabled="">
+<span class="material-symbols-outlined text-[16px]">chevron_left</span> Prev
+          </button>
+<button class="w-8 h-8 rounded bg-primary-fixed text-on-primary font-code-sm text-code-sm font-bold flex items-center justify-center transition-all">
+            1
+          </button>
+<button class="w-8 h-8 rounded bg-surface-container-high text-on-surface hover:text-primary hover:bg-surface-variant font-code-sm text-code-sm flex items-center justify-center transition-all">
+            2
+          </button>
+<button class="w-8 h-8 rounded bg-surface-container-high text-on-surface hover:text-primary hover:bg-surface-variant font-code-sm text-code-sm flex items-center justify-center transition-all">
+            3
+          </button>
+<span class="w-8 h-8 flex items-center justify-center text-outline-variant font-code-sm text-code-sm">...</span>
+<button class="w-8 h-8 rounded bg-surface-container-high text-on-surface hover:text-primary hover:bg-surface-variant font-code-sm text-code-sm flex items-center justify-center transition-all">
+            18
+          </button>
+<button class="px-space-sm py-1.5 rounded bg-surface-container-high text-on-surface-variant hover:text-primary hover:bg-surface-variant font-code-sm text-code-sm flex items-center gap-1 transition-all">
+            Next <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Notice Footer Banner -->
+<div class="bg-surface-container-low p-space-md rounded-xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary-fixed text-[20px] shrink-0">info</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+          Scores update as submissions are verified. Verification runs continuously via background worker. 
+          <span class="text-primary font-medium">Have an issue with your sync? Reach out on #leetcode-help channel.</span>
+</p>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<span class="font-label-caps text-label-caps text-outline uppercase">LEETCODE API STATUS</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-code-sm text-code-sm text-primary-fixed flex items-center gap-1 font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span> 99.98% HEALTHY
+        </span>
+</div>
+</div>
+</div>
+<script>
+    // Micro-interactions: Jump to user rank & Filter selection
+    document.addEventListener('DOMContentLoaded', () => {
+      const jumpBtn = document.getElementById('jumpToMyRankBtn');
+      const myRankRow = document.getElementById('myRankRow');
+      const refreshBtn = document.getElementById('refreshSyncBtn');
+      const searchInput = document.getElementById('studentSearchInput');
+      const filterButtons = document.querySelectorAll('#yearFilterGroup button');
+
+      // Scroll smoothly to logged in user's row
+      if (jumpBtn && myRankRow) {
+        jumpBtn.addEventListener('click', () => {
+          myRankRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          myRankRow.classList.add('bg-primary-container/25');
+          setTimeout(() => {
+            myRankRow.classList.remove('bg-primary-container/25');
+          }, 2000);
+        });
+      }
+
+      // Sync button feedback animation
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+          const icon = refreshBtn.querySelector('.material-symbols-outlined');
+          if (icon) {
+            icon.classList.add('animate-spin');
+            setTimeout(() => {
+              icon.classList.remove('animate-spin');
+            }, 1000);
+          }
+        });
+      }
+
+      // Filter pill interaction
+      filterButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          filterButtons.forEach(b => {
+            b.className = 'px-space-sm py-1 rounded font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-all';
+          });
+          btn.className = 'px-space-sm py-1 rounded font-code-sm text-code-sm font-semibold bg-surface-container-high text-primary transition-all';
+        });
+      });
+
+      // Simple real-time row search filter demo
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          const query = e.target.value.toLowerCase().trim();
+          const rows = document.querySelectorAll('tbody tr:not(:has(td[colspan]))');
+          rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+          });
+        });
+      }
+    });
+  </script>
+</div></main><footer class="w-full bg-surface-container-lowest border-t border-surface-container-high/60 py-space-md mt-auto"><div class="w-full px-margin-mobile lg:px-margin flex flex-col md:flex-row items-center justify-between gap-space-md"><div class="flex items-center gap-space-sm"><span class="w-2 h-2 rounded-full bg-primary-fixed shrink-0"></span><span class="font-label-caps text-label-caps uppercase text-primary-fixed tracking-wider">SYSTEM OPERATIONAL (LEETCODE SYNC OK)</span></div><div class="text-center md:text-right"><p class="font-label-caps text-label-caps uppercase text-on-surface-variant tracking-wider">30 DAYS LEETCODE CHALLENGE — COLLEGE EDITION • VERIFIED VIA LEETCODE SYNC • BUILT FOR PLACEMENT MASTERY</p></div></div></footer></body></html>

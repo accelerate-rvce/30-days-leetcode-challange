@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><title>30 Days LeetCode Challenge — College Edition</title><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base { html, body { margin: 0; padding: 0; } body { overscroll-behavior: none; } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "surface-container": "#1f2020", "surface-container-high": "#292a2a", "on-secondary-fixed": "#1b1c1c", "outline-variant": "#434935", "surface-variant": "#343535", "inverse-surface": "#e3e2e2", "on-primary-fixed-variant": "#374e00", "on-error-container": "#ffdad6", "surface-container-lowest": "#0d0e0f", "on-tertiary": "#313030", "surface-tint": "#a2d824", "secondary": "#c8c6c5", "surface-dim": "#121414", "outline": "#8d937c", "on-secondary": "#303030", "tertiary": "#ffffff", "on-surface": "#e3e2e2", "surface-bright": "#383939", "error-container": "#93000a", "inverse-primary": "#4a6700", "secondary-fixed-dim": "#c8c6c5", "tertiary-fixed": "#e5e2e1", "on-tertiary-fixed-variant": "#474646", "secondary-fixed": "#e5e2e1", "on-primary-container": "#4f6e00", "on-surface-variant": "#c3c9b0", "on-secondary-fixed-variant": "#474746", "on-background": "#e3e2e2", "primary-fixed": "#bcf543", "secondary-container": "#474746", "inverse-on-surface": "#303031", "on-tertiary-fixed": "#1c1b1b", "tertiary-container": "#e5e2e1", "background": "#121414", "surface-container-highest": "#343535", "on-tertiary-container": "#656464", "primary": "#ffffff", "on-error": "#690005", "on-primary-fixed": "#141f00", "primary-fixed-dim": "#a2d824", "surface-container-low": "#1b1c1c", "tertiary-fixed-dim": "#c8c6c5", "on-secondary-container": "#b7b5b4", "on-primary": "#253600", "primary-container": "#bcf543", "surface": "#121414", "error": "#ffb4ab" }, "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, "spacing": { "margin-mobile": "1rem", "space-sm": "0.5rem", "gutter-mobile": "0.75rem", "space-xl": "2.5rem", "gutter": "1rem", "space-lg": "1.5rem", "margin": "2rem", "space-xs": "0.25rem", "space-md": "1rem" }, "fontFamily": { "label-caps": [ "JetBrains Mono" ], "headline-xl": [ "Geist" ], "code-sm": [ "JetBrains Mono" ], "headline-md": [ "Geist" ], "headline-lg": [ "Geist" ], "headline-xl-mobile": [ "Geist" ], "body-md": [ "Inter" ], "code-md": [ "JetBrains Mono" ], "body-lg": [ "Inter" ], "body-sm": [ "Inter" ] }, "fontSize": { "label-caps": [ "10px", { "lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "600" } ], "headline-xl": [ "40px", { "lineHeight": "48px", "letterSpacing": "-0.03em", "fontWeight": "600" } ], "code-sm": [ "11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" } ], "headline-md": [ "20px", { "lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "500" } ], "headline-lg": [ "28px", { "lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "600" } ], "headline-xl-mobile": [ "30px", { "lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "600" } ], "body-md": [ "14px", { "lineHeight": "20px", "letterSpacing": "-0.006em", "fontWeight": "400" } ], "code-md": [ "13px", { "lineHeight": "18px", "letterSpacing": "-0.01em", "fontWeight": "500" } ], "body-lg": [ "16px", { "lineHeight": "24px", "letterSpacing": "-0.011em", "fontWeight": "400" } ], "body-sm": [ "12px", { "lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "400" } ] } } } };</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary"><header class="fixed top-0 left-0 right-0 z-50 bg-surface-container-lowest/90 backdrop-blur-md border-b border-surface-container-high/60"><div class="h-16 w-full px-margin-mobile lg:px-margin flex items-center justify-between gap-gutter"><div class="flex items-center gap-space-md shrink-0"><a class="flex items-center gap-space-sm group" data-path="home" href="#"><img alt="30DAYS Brand Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1XfB4tsNhHzz7jCLZFj4X6IwdPYEtyGEAt511s8uQH6aUR4QxhS1ONSrkwYUr9YaOZo56VMM_VLOP4MHf1hb-6cik5W0fGsKyMpYHO7n7MQePS_2xhi3YhWIOw1ZcpKs3-XlPAIKkjnb-VOLAb4Gco7XgDZvUVKz-fAx5_2cll5h40QcUH8G-1PCweRpG9Ve15KtYlPswSY_NvdK7VdsmmFv0NX7AZQoCLBxkhFzF-9iYw2i97knhQZFg"/><div class="flex flex-col"><span class="font-label-caps text-label-caps uppercase tracking-wider text-primary">30DAYS</span><span class="font-code-sm text-code-sm text-on-surface-variant group-hover:text-primary transition-colors">COLLEGE</span></div></a><div class="hidden sm:flex items-center gap-space-xs px-space-sm py-1 rounded-full bg-surface-container-low border border-outline-variant/40"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-fixed opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-primary-fixed"></span></span><span class="font-label-caps text-label-caps uppercase text-primary-fixed">TODAY'S QUESTION IS LIVE</span><span class="font-code-sm text-code-sm text-secondary-fixed-dim border-l border-surface-container-high pl-1.5 ml-0.5">Day 07/30</span></div></div><nav class="hidden md:flex items-center gap-space-xs p-1 rounded bg-surface-container-lowest border border-surface-container-high/40" data-active-classes="bg-surface-container-high text-primary font-medium rounded"><a class="px-space-md py-1.5 font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low rounded transition-colors" data-path="home" href="#">Home</a><a aria-current="page" class="px-space-md py-1.5 transition-colors bg-surface-container-high text-primary font-medium rounded" data-path="daily-challenge" href="#">Daily Challenge</a><a class="px-space-md py-1.5 font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low rounded transition-colors" data-path="leaderboard" href="#">Leaderboard</a><a class="px-space-md py-1.5 font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low rounded transition-colors" data-path="my-progress" href="#">My Progress</a></nav><div class="flex items-center gap-space-md shrink-0"><div class="flex items-center gap-1.5 px-space-sm py-1 rounded-full bg-surface-container-low border border-outline-variant/50 shadow-sm"><span class="font-code-sm text-code-sm leading-none">🔥</span><span class="font-code-sm text-code-sm text-primary-fixed font-semibold">7</span><span class="font-code-sm text-code-sm text-on-surface-variant hidden sm:inline">Streak</span></div><button aria-label="Notifications" class="relative p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button"><span class="material-symbols-outlined text-[20px] leading-none">notifications</span><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary-fixed rounded-full"></span></button><div class="flex items-center gap-space-sm pl-space-xs border-l border-surface-container-high/60 cursor-pointer group"><div class="relative"><img alt="Profile" class="w-8 h-8 rounded-full object-cover ring-1 ring-outline-variant/50 group-hover:ring-primary-fixed transition-all" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCgjZOzHXNHgZFLmyCVwAuEP2RcWZmHutpISuTnaeWsGf6pFyz6Zzi9BtRMhrCjJYC_Tp9xl6J__W0D7Ab9p8ND-XZF8czUsKq5HEr60IO40DEk9C2K905JPXBflpRPqOb2dXpaxQaNFu4ykxxlzthbg7egN9cu7uPCoe3eQmojnmJKQvV2rr5ux99BVcCTMxFFpi5e1cOOjvbugC2rzE0M_nYBertsEW5onDa4M7p2kH_dIeTnJYPS"/></div><div class="hidden xl:flex flex-col text-left"><span class="font-code-sm text-code-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-tight">arjun.sharma</span><span class="font-label-caps text-label-caps text-on-surface-variant uppercase leading-tight">3rd Year CSE</span></div><span class="material-symbols-outlined text-on-surface-variant group-hover:text-on-surface text-[18px] transition-transform group-hover:translate-y-0.5">expand_more</span></div></div></div></header><main class="w-full pt-16 flex-1 bg-surface"><div class="flex flex-col w-full">
+<!-- Subtle Gradient Ambient Depth Layer (Contained) -->
+<div class="relative w-full overflow-hidden">
+<div class="absolute -top-32 left-1/4 w-[580px] h-[340px] bg-primary-fixed/5 rounded-full blur-[130px] pointer-events-none -z-10"></div>
+<div class="absolute top-96 right-10 w-[420px] h-[300px] bg-surface-container-high/40 rounded-full blur-[100px] pointer-events-none -z-10"></div>
+<div class="w-full px-margin-mobile lg:px-margin py-space-xl space-y-space-xl">
+<!-- Greeting & College Meta Hierarchy -->
+<section class="flex flex-col lg:flex-row lg:items-end justify-between gap-space-lg">
+<div class="space-y-space-xs">
+<div class="flex items-center gap-space-sm flex-wrap">
+<span class="font-label-caps text-label-caps text-primary-fixed px-space-sm py-0.5 bg-surface-container-low rounded-full tracking-widest uppercase">
+              COHORT S24 • BATCH A
+            </span>
+<span class="inline-flex items-center gap-1.5 font-code-sm text-code-sm text-on-surface-variant">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span>
+              LeetCode Handle: <span class="text-on-surface font-semibold">@arjun_codes</span>
+</span>
+</div>
+<h1 class="font-headline-xl text-headline-xl tracking-tight text-on-surface">
+            Welcome back, <span class="text-primary font-bold">Arjun Sharma</span>
+</h1>
+<p class="font-body-md text-body-md text-on-surface-variant flex items-center gap-space-sm flex-wrap">
+<span>3rd Year CSE</span>
+<span class="text-surface-container-highest">•</span>
+<span>Delhi Technological University</span>
+<span class="text-surface-container-highest">•</span>
+<span class="inline-flex items-center gap-1 text-primary-fixed font-code-sm font-semibold">
+<span class="material-symbols-outlined text-[16px]">military_tech</span>
+              Rank #14 of 420
+            </span>
+</p>
+</div>
+<!-- Quick Terminal Action Bar -->
+<div class="flex items-center gap-space-sm self-start lg:self-auto shrink-0">
+<div class="flex items-center gap-2 px-space-md py-2 bg-surface-container-low rounded shadow-sm text-on-surface-variant font-code-sm text-code-sm">
+<span class="w-2 h-2 rounded-full bg-primary-fixed animate-pulse"></span>
+<span>SYNC FREQUENCY: 60s</span>
+</div>
+<button class="flex items-center gap-1.5 px-space-md py-2 bg-surface-container hover:bg-surface-container-high text-on-surface rounded font-code-sm text-code-sm transition-all active:scale-95 shadow-sm" id="syncTriggerBtn">
+<span class="material-symbols-outlined text-[16px] text-primary-fixed transition-transform duration-500" id="syncIcon">sync</span>
+<span>Force Sync</span>
+</button>
+</div>
+</section>
+<!-- Top Stat Bar / KPI Row (5-Card Bento Strip) -->
+<section class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-gutter">
+<!-- Card 1: Challenge Day -->
+<div class="p-space-md bg-surface-container-low rounded shadow-sm flex flex-col justify-between group hover:bg-surface-container transition-colors">
+<div class="flex items-center justify-between text-on-surface-variant mb-space-sm">
+<span class="font-label-caps text-label-caps uppercase tracking-wider">CHALLENGE DAY</span>
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">calendar_today</span>
+</div>
+<div class="space-y-1">
+<div class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">
+              07 <span class="text-on-surface-variant font-code-md text-code-md">/ 30</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">
+              23 days remaining
+            </div>
+</div>
+</div>
+<!-- Card 2: Streak -->
+<div class="p-space-md bg-surface-container-low rounded shadow-sm flex flex-col justify-between group hover:bg-surface-container transition-colors">
+<div class="flex items-center justify-between text-on-surface-variant mb-space-sm">
+<span class="font-label-caps text-label-caps uppercase tracking-wider">CURRENT STREAK</span>
+<span class="font-code-sm text-[16px] leading-none">🔥</span>
+</div>
+<div class="space-y-1">
+<div class="font-headline-lg text-headline-lg text-primary-fixed font-semibold tracking-tight flex items-baseline gap-1">
+              7 <span class="text-on-surface font-body-sm text-body-sm font-normal">Days</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-primary-fixed">verified</span>
+              Personal best: 7 days
+            </div>
+</div>
+</div>
+<!-- Card 3: Questions Completed -->
+<div class="p-space-md bg-surface-container-low rounded shadow-sm flex flex-col justify-between group hover:bg-surface-container transition-colors">
+<div class="flex items-center justify-between text-on-surface-variant mb-space-sm">
+<span class="font-label-caps text-label-caps uppercase tracking-wider">QUESTIONS COMPLETED</span>
+<span class="material-symbols-outlined text-[18px] text-primary-fixed">task_alt</span>
+</div>
+<div class="space-y-1">
+<div class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">
+              6 <span class="text-on-surface-variant font-code-md text-code-md">/ 7</span>
+</div>
+<div class="font-code-sm text-code-sm text-primary-fixed">
+              85.7% completion rate
+            </div>
+</div>
+</div>
+<!-- Card 4: Total Points & Rank -->
+<div class="p-space-md bg-surface-container-low rounded shadow-sm flex flex-col justify-between group hover:bg-surface-container transition-colors">
+<div class="flex items-center justify-between text-on-surface-variant mb-space-sm">
+<span class="font-label-caps text-label-caps uppercase tracking-wider">TOTAL SCORE</span>
+<span class="material-symbols-outlined text-[18px] text-primary-fixed">bolt</span>
+</div>
+<div class="space-y-1">
+<div class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight flex items-baseline gap-1">
+              180 <span class="font-code-sm text-code-sm text-primary-fixed font-semibold">PTS</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant truncate">
+              Rank <span class="text-on-surface font-semibold">#14</span> of 420 campus
+            </div>
+</div>
+</div>
+<!-- Card 5: Challenge Completion (Radial Visual) -->
+<div class="col-span-2 md:col-span-1 p-space-md bg-surface-container-low rounded shadow-sm flex items-center justify-between group hover:bg-surface-container transition-colors">
+<div class="space-y-1">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant tracking-wider block">PROGRAM FINISH</span>
+<div class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">
+              20<span class="font-code-sm text-code-sm text-primary-fixed">%</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">
+              6 of 30 Solved
+            </div>
+</div>
+<!-- Crisp SVG Ring Visualization -->
+<div class="relative w-16 h-16 flex items-center justify-center shrink-0">
+<svg class="w-16 h-16 transform -rotate-90" viewbox="0 0 64 64">
+<circle class="text-surface-container-high" cx="32" cy="32" fill="transparent" r="26" stroke="currentColor" stroke-width="5"></circle>
+<circle class="text-primary-fixed transition-all duration-1000" cx="32" cy="32" fill="transparent" r="26" stroke="currentColor" stroke-dasharray="163.36" stroke-dashoffset="130.68" stroke-linecap="round" stroke-width="5"></circle>
+</svg>
+<span class="absolute font-label-caps text-label-caps font-bold text-on-surface">6/30</span>
+</div>
+</div>
+</section>
+<!-- MAIN HERO SECTION: TODAY'S CHALLENGE — DAY 07 -->
+<section class="relative rounded-lg bg-surface-container-low shadow-xl overflow-hidden group">
+<!-- Visual Accent Strip at top -->
+<div class="h-1 w-full bg-gradient-to-r from-primary-fixed via-primary-fixed/80 to-surface-container"></div>
+<div class="p-space-lg lg:p-space-xl space-y-space-lg">
+<!-- Card Header & Status Badges -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-sm flex-wrap">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container font-label-caps text-label-caps text-primary-fixed uppercase tracking-wider">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-fixed opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-primary-fixed"></span>
+</span>
+                DAY 07 • LIVE NOW
+              </span>
+<span class="px-2.5 py-1 rounded-full bg-surface-container font-label-caps text-label-caps text-on-surface-variant tracking-wider uppercase">
+                HARDWARE DISPATCH: T-MINUS 04H 32M
+              </span>
+</div>
+<!-- Verification Status Indicator -->
+<div class="inline-flex items-center gap-2 px-space-md py-1.5 rounded-full bg-surface-container text-on-surface-variant font-code-sm text-code-sm">
+<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+<span class="text-amber-300 font-medium">Attempt Recorded</span>
+<span class="text-surface-container-highest">•</span>
+<span class="text-on-surface-variant">Verification Pending</span>
+</div>
+</div>
+<!-- Question Title & Metadata Tags -->
+<div class="space-y-space-sm">
+<div class="flex flex-col xl:flex-row xl:items-baseline justify-between gap-space-sm">
+<h2 class="font-headline-lg text-headline-lg md:text-headline-xl text-on-surface font-semibold tracking-tight">
+                33. Search in Rotated Sorted Array
+              </h2>
+<div class="flex items-center gap-space-md shrink-0">
+<span class="font-code-md text-code-md text-on-surface-variant">Value: <span class="text-primary-fixed font-semibold">30 pts</span></span>
+<span class="font-label-caps text-label-caps uppercase px-2 py-0.5 rounded bg-surface-container text-on-surface">Target Complexity: O(log n)</span>
+</div>
+</div>
+<!-- Categorical Tags Strip -->
+<div class="flex flex-wrap items-center gap-2 pt-1">
+<!-- Difficulty Badge -->
+<span class="font-label-caps text-label-caps px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-semibold uppercase">
+                Medium
+              </span>
+<span class="font-label-caps text-label-caps px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface font-medium uppercase">
+                Binary Search
+              </span>
+<span class="font-label-caps text-label-caps px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface font-medium uppercase">
+                Arrays
+              </span>
+<span class="font-label-caps text-label-caps px-2.5 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed font-semibold uppercase">
+                Microsoft / Amazon Drive '24
+              </span>
+<span class="font-label-caps text-label-caps px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant uppercase">
+                Placement High-Frequency
+              </span>
+</div>
+</div>
+<!-- Problem Excerpt Box -->
+<div class="p-space-md bg-surface-container-lowest rounded space-y-space-xs font-body-md text-body-md text-secondary">
+<p class="leading-relaxed">
+              Given the array <code class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-primary-fixed font-semibold">nums</code> after the possible rotation and an integer <code class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-primary-fixed font-semibold">target</code>, return the index of <code class="font-code-sm text-code-sm text-on-surface">target</code> if it is in <code class="font-code-sm text-code-sm text-on-surface">nums</code>, or <code class="font-code-sm text-code-sm text-on-surface">-1</code> if it is not in nums.
+            </p>
+<p class="font-code-sm text-code-sm text-on-surface-variant pt-1">
+              Constraints: 1 ≤ nums.length ≤ 5000 | -10⁴ ≤ nums[i] ≤ 10⁴ | All values unique | You must write an algorithm with O(log n) runtime complexity.
+            </p>
+</div>
+<!-- Action Hub & Deadline Strip -->
+<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-space-md pt-space-xs">
+<div class="flex items-center gap-space-lg flex-wrap">
+<div class="flex items-center gap-2 text-on-surface-variant font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[18px] text-amber-400">timer</span>
+<span>Deadline: <span class="text-on-surface font-medium">Today, 11:59 PM IST</span></span>
+<span class="text-primary-fixed font-semibold font-code-sm">(04h 32m left)</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[18px] text-primary-fixed">group</span>
+<span>Campus Solvers Today: <span class="text-on-surface font-semibold">142 students</span></span>
+</div>
+</div>
+<!-- Primary CTAs -->
+<div class="flex items-center gap-space-sm shrink-0">
+<a class="inline-flex items-center gap-2 px-space-lg py-3 rounded bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed font-semibold text-body-md transition-all active:scale-95 shadow-md group/btn" href="https://leetcode.com/problems/search-in-rotated-sorted-array/" rel="noopener noreferrer" target="_blank">
+<span>Solve on LeetCode</span>
+<span class="material-symbols-outlined text-[18px] font-bold group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform">north_east</span>
+</a>
+<button class="px-space-md py-3 rounded bg-surface-container hover:bg-surface-container-high text-on-surface font-body-sm text-body-sm transition-colors" type="button">
+                Hints (1/3)
+              </button>
+</div>
+</div>
+<!-- Secondary Verification Notice Callout -->
+<div class="p-space-md bg-surface-container rounded flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+<div class="flex items-start gap-space-sm">
+<span class="material-symbols-outlined text-[20px] text-primary-fixed shrink-0 mt-0.5">info</span>
+<div class="space-y-0.5">
+<p class="font-body-sm text-body-sm text-on-surface font-medium">
+                  Automatic Sync Verification Active
+                </p>
+<p class="font-code-sm text-code-sm text-on-surface-variant">
+                  Do not submit code here. Solve directly on LeetCode under handle <span class="text-on-surface font-semibold">@arjun_codes</span>. Leaderboard updates reflect automatically within 2–5 minutes.
+                </p>
+</div>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant font-label-caps text-label-caps uppercase shrink-0 sm:self-center">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span>
+              WEBHOOK STATUS: IDLE
+            </div>
+</div>
+</div>
+</section>
+<!-- TWO-COLUMN LAYOUT: PREVIOUS CHALLENGES vs UPCOMING & VERIFICATION FEED -->
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-gutter items-start">
+<!-- Column 1: Previous Challenges (Days 01 - 06) [7 Cols] -->
+<div class="lg:col-span-7 space-y-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant tracking-wider">SPRINT ARCHIVE</span>
+<span class="font-headline-md text-headline-md text-on-surface font-semibold ml-2">Days 01 — 06</span>
+</div>
+<span class="font-code-sm text-code-sm text-primary-fixed font-semibold">6 / 6 Completed</span>
+</div>
+<!-- Challenge List Group -->
+<div class="bg-surface-container-low rounded-lg shadow-sm divide-y divide-surface-container-high/40 overflow-hidden">
+<!-- Day 06 -->
+<div class="p-space-md hover:bg-surface-container transition-colors flex items-center justify-between gap-space-md group">
+<div class="flex items-center gap-space-md min-w-0">
+<span class="font-code-md text-code-md font-semibold text-primary-fixed shrink-0">D06</span>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate group-hover:text-primary transition-colors">Two Sum</span>
+<span class="font-label-caps text-label-caps px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed uppercase font-semibold">Easy</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant block truncate">Arrays &amp; Hash Map • Solved in 42ms</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-caps text-label-caps uppercase text-primary-fixed font-semibold">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Points Awarded
+                  </span>
+<div class="font-code-sm text-code-sm text-on-surface font-bold">+20 pts</div>
+</div>
+<a class="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="https://leetcode.com/problems/two-sum/" target="_blank" title="Review on LeetCode">
+<span class="material-symbols-outlined text-[18px]">launch</span>
+</a>
+</div>
+</div>
+<!-- Day 05 -->
+<div class="p-space-md hover:bg-surface-container transition-colors flex items-center justify-between gap-space-md group">
+<div class="flex items-center gap-space-md min-w-0">
+<span class="font-code-md text-code-md font-semibold text-primary-fixed shrink-0">D05</span>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate group-hover:text-primary transition-colors">Valid Anagram</span>
+<span class="font-label-caps text-label-caps px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed uppercase font-semibold">Easy</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant block truncate">Strings &amp; Frequency Vector • 100% Runtime</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-caps text-label-caps uppercase text-primary-fixed font-semibold">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Points Awarded
+                  </span>
+<div class="font-code-sm text-code-sm text-on-surface font-bold">+20 pts</div>
+</div>
+<a class="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="https://leetcode.com/problems/valid-anagram/" target="_blank" title="Review on LeetCode">
+<span class="material-symbols-outlined text-[18px]">launch</span>
+</a>
+</div>
+</div>
+<!-- Day 04 -->
+<div class="p-space-md hover:bg-surface-container transition-colors flex items-center justify-between gap-space-md group">
+<div class="flex items-center gap-space-md min-w-0">
+<span class="font-code-md text-code-md font-semibold text-primary-fixed shrink-0">D04</span>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate group-hover:text-primary transition-colors">Group Anagrams</span>
+<span class="font-label-caps text-label-caps px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 uppercase font-semibold">Medium</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant block truncate">Hash Tables &amp; Sorting Categorization</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-caps text-label-caps uppercase text-primary-fixed font-semibold">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Points Awarded
+                  </span>
+<div class="font-code-sm text-code-sm text-on-surface font-bold">+30 pts</div>
+</div>
+<a class="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="https://leetcode.com/problems/group-anagrams/" target="_blank" title="Review on LeetCode">
+<span class="material-symbols-outlined text-[18px]">launch</span>
+</a>
+</div>
+</div>
+<!-- Day 03 -->
+<div class="p-space-md hover:bg-surface-container transition-colors flex items-center justify-between gap-space-md group">
+<div class="flex items-center gap-space-md min-w-0">
+<span class="font-code-md text-code-md font-semibold text-primary-fixed shrink-0">D03</span>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate group-hover:text-primary transition-colors">Top K Frequent Elements</span>
+<span class="font-label-caps text-label-caps px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 uppercase font-semibold">Medium</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant block truncate">Priority Queue &amp; Min-Heap Optimization</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-caps text-label-caps uppercase text-primary-fixed font-semibold">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Points Awarded
+                  </span>
+<div class="font-code-sm text-code-sm text-on-surface font-bold">+30 pts</div>
+</div>
+<a class="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="https://leetcode.com/problems/top-k-frequent-elements/" target="_blank" title="Review on LeetCode">
+<span class="material-symbols-outlined text-[18px]">launch</span>
+</a>
+</div>
+</div>
+<!-- Day 02 -->
+<div class="p-space-md hover:bg-surface-container transition-colors flex items-center justify-between gap-space-md group">
+<div class="flex items-center gap-space-md min-w-0">
+<span class="font-code-md text-code-md font-semibold text-primary-fixed shrink-0">D02</span>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate group-hover:text-primary transition-colors">Longest Consecutive Sequence</span>
+<span class="font-label-caps text-label-caps px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 uppercase font-semibold">Medium</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant block truncate">Unordered Set Lookup • O(n) Bound</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-caps text-label-caps uppercase text-primary-fixed font-semibold">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Points Awarded
+                  </span>
+<div class="font-code-sm text-code-sm text-on-surface font-bold">+30 pts</div>
+</div>
+<a class="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="https://leetcode.com/problems/longest-consecutive-sequence/" target="_blank" title="Review on LeetCode">
+<span class="material-symbols-outlined text-[18px]">launch</span>
+</a>
+</div>
+</div>
+<!-- Day 01 -->
+<div class="p-space-md hover:bg-surface-container transition-colors flex items-center justify-between gap-space-md group">
+<div class="flex items-center gap-space-md min-w-0">
+<span class="font-code-md text-code-md font-semibold text-primary-fixed shrink-0">D01</span>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate group-hover:text-primary transition-colors">Contains Duplicate</span>
+<span class="font-label-caps text-label-caps px-2 py-0.5 rounded-full bg-primary-fixed/10 text-primary-fixed uppercase font-semibold">Easy</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant block truncate">Hash Set Membership Testing</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-caps text-label-caps uppercase text-primary-fixed font-semibold">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Points Awarded
+                  </span>
+<div class="font-code-sm text-code-sm text-on-surface font-bold">+20 pts</div>
+</div>
+<a class="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="https://leetcode.com/problems/contains-duplicate/" target="_blank" title="Review on LeetCode">
+<span class="material-symbols-outlined text-[18px]">launch</span>
+</a>
+</div>
+</div>
+</div>
+<!-- Progress Matrix Mini Footer -->
+<div class="p-space-md bg-surface-container-low rounded-lg flex items-center justify-between text-on-surface-variant font-code-sm text-code-sm">
+<span class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary-fixed">auto_graph</span>
+              Week 1: Array &amp; Hashing Phase Completed (100%)
+            </span>
+<span class="text-on-surface font-semibold">180 / 180 Pts Claimed</span>
+</div>
+</div>
+<!-- Column 2: Upcoming Schedule & Recent Verification Activity [5 Cols] -->
+<div class="lg:col-span-5 space-y-space-lg">
+<!-- Upcoming Schedule Card -->
+<div class="space-y-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant tracking-wider">UPCOMING SCHEDULE</span>
+<span class="font-label-caps text-label-caps uppercase text-primary-fixed">T-MINUS 22H</span>
+</div>
+<div class="p-space-md bg-surface-container-low rounded-lg shadow-sm space-y-space-sm relative overflow-hidden">
+<div class="absolute right-0 top-0 w-24 h-24 bg-surface-container-high/20 rounded-full blur-xl pointer-events-none"></div>
+<div class="flex items-start justify-between">
+<div>
+<span class="font-code-sm text-code-sm text-primary-fixed font-semibold">Day 08 Drop</span>
+<h4 class="font-headline-md text-headline-md text-on-surface font-medium mt-0.5">Two Pointers Module</h4>
+</div>
+<span class="material-symbols-outlined text-[24px] text-on-surface-variant">lock_clock</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                Unlocks tomorrow at <strong class="text-on-surface">6:00 PM IST</strong>. Curated specifically for standard FAANG 45-minute technical screeners.
+              </p>
+<div class="pt-space-xs flex items-center gap-space-sm font-label-caps text-label-caps text-on-surface-variant flex-wrap">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface">Expected: Medium</span>
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface">30 PTS</span>
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface">Two Pointers</span>
+</div>
+</div>
+</div>
+<!-- Real-Time LeetCode Verification Activity Feed -->
+<div class="space-y-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps uppercase text-on-surface-variant tracking-wider">SYNC TELEMETRY</span>
+<span class="inline-flex items-center gap-1 font-code-sm text-code-sm text-primary-fixed">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed"></span>
+                POLLING ACTIVE
+              </span>
+</div>
+<!-- Activity Items Container -->
+<div class="p-space-md bg-surface-container-low rounded-lg shadow-sm space-y-space-md">
+<div class="relative pl-6 space-y-space-md before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-surface-container-high">
+<!-- Event 1 (Pending sync) -->
+<div class="relative">
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-4 ring-surface-container-low animate-ping"></span>
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-4 ring-surface-container-low"></span>
+<div class="space-y-0.5">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">Day 07 'Solve on LeetCode' clicked</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">12M AGO</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                      Dispatcher awaiting LeetCode submission sync for problem #33. Check runtime response shortly.
+                    </p>
+</div>
+</div>
+<!-- Event 2 (Accepted) -->
+<div class="relative">
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-primary-fixed ring-4 ring-surface-container-low"></span>
+<div class="space-y-0.5">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">Day 06 Verified: Accepted</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">YESTERDAY</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                      Runtime: <span class="text-primary-fixed font-code-sm">42ms</span> (Beats 89.2%), Memory: 16.4MB.
+                    </p>
+<span class="inline-block mt-1 font-label-caps text-label-caps text-primary-fixed px-2 py-0.5 bg-surface-container rounded">
+                      +20 CAMPUS POINTS LOGGED
+                    </span>
+</div>
+</div>
+<!-- Event 3 (Accepted) -->
+<div class="relative">
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-primary-fixed ring-4 ring-surface-container-low"></span>
+<div class="space-y-0.5">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">Day 05 Verified: Accepted</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">2 DAYS AGO</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                      Automated webhook parsed submission ID #119284210. Valid Anagram scored.
+                    </p>
+<span class="inline-block mt-1 font-label-caps text-label-caps text-primary-fixed px-2 py-0.5 bg-surface-container rounded">
+                      +20 CAMPUS POINTS LOGGED
+                    </span>
+</div>
+</div>
+</div>
+<!-- Terminal Ping Status -->
+<div class="pt-space-xs border-t border-surface-container-high/40 flex items-center justify-between font-label-caps text-label-caps text-on-surface-variant uppercase">
+<span>SESSION: AUTHENTICATED</span>
+<span class="text-primary-fixed">LATENCY: 48MS</span>
+</div>
+</div>
+</div>
+<!-- Placement Prep Tip Card -->
+<div class="p-space-md bg-surface-container-lowest rounded-lg flex items-center gap-space-md">
+<span class="material-symbols-outlined text-[24px] text-primary-fixed shrink-0">school</span>
+<div class="space-y-0.5">
+<span class="font-code-sm text-code-sm text-on-surface font-semibold block">Campus Recruiter Note</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                Completing 25+ days earns the verified DTU Placement Cell Algorithmic Mastery Certificate &amp; direct fast-track interview referral.
+              </p>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</div>
+<script>
+  // Micro-interaction for Force Sync trigger button
+  const syncBtn = document.getElementById('syncTriggerBtn');
+  const syncIcon = document.getElementById('syncIcon');
+  
+  if (syncBtn && syncIcon) {
+    syncBtn.addEventListener('click', () => {
+      syncIcon.classList.add('rotate-180');
+      syncBtn.disabled = true;
+      syncBtn.classList.add('opacity-75');
+      
+      setTimeout(() => {
+        syncIcon.classList.remove('rotate-180');
+        syncBtn.disabled = false;
+        syncBtn.classList.remove('opacity-75');
+      }, 1000);
+    });
+  }
+</script></main><footer class="w-full bg-surface-container-lowest border-t border-surface-container-high/60 py-space-md mt-auto"><div class="w-full px-margin-mobile lg:px-margin flex flex-col md:flex-row items-center justify-between gap-space-md"><div class="flex items-center gap-space-sm"><span class="w-2 h-2 rounded-full bg-primary-fixed shrink-0"></span><span class="font-label-caps text-label-caps uppercase text-primary-fixed tracking-wider">SYSTEM OPERATIONAL (LEETCODE SYNC OK)</span></div><div class="text-center md:text-right"><p class="font-label-caps text-label-caps uppercase text-on-surface-variant tracking-wider">30 DAYS LEETCODE CHALLENGE — COLLEGE EDITION • VERIFIED VIA LEETCODE SYNC • BUILT FOR PLACEMENT MASTERY</p></div></div></footer></body></html>

@@ -1,0 +1,16 @@
+{
+  "name": "30days-college-frontend",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend/app run dev -- --hostname 0.0.0.0",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:worker": "npm --prefix backend run dev:worker",
+    "build": "npm --prefix frontend/app run build && npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend/app run build",
+    "build:backend": "npm --prefix backend run build",
+    "lint": "npm --prefix frontend/app run lint",
+    "start": "npm --prefix frontend/app run start",
+    "start:backend": "npm --prefix backend run start",
+    "start:worker": "npm --prefix backend run start:worker"
+  }
+}
