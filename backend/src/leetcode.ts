@@ -1,7 +1,14 @@
 import { Challenge } from "./types.js";
 
-export type Submission = { id?: string; titleSlug?: string; statusDisplay?: string; timestamp?: number };
+export type Submission = { id?: string; titleSlug?: string; statusDisplay?: string; timestamp?: number | string };
 const endpoint = process.env.LEETCODE_GRAPHQL_URL ?? "https://leetcode.com/graphql";
+
+// LeetCode returns `timestamp` as a string of unix seconds (e.g. "1792093127").
+// Coerce it — a strict `typeof === "number"` check silently discards every submission.
+export function submissionTimeMs(value: unknown): number | null {
+  const seconds = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(seconds) ? seconds * 1000 : null;
+}
 
 export async function fetchRecentAcceptedSubmissions(handle: string): Promise<{ kind: "ok" | "unavailable"; submissions: Submission[]; reason?: string }> {
   if (!handle) return { kind: "unavailable", submissions: [], reason: "missing_handle" };
@@ -24,7 +31,7 @@ export async function fetchRecentAccepted(handle: string, challenge: Challenge):
   if (result.kind === "unavailable") return { kind: "unavailable", reason: result.reason };
   const match = result.submissions
     .filter((item) => item.titleSlug === challenge.slug && item.statusDisplay === "Accepted")
-    .filter((item) => typeof item.timestamp === "number" && item.timestamp * 1000 >= Date.parse(challenge.publishedAt))
-    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))[0];
+    .filter((item) => { const timeMs = submissionTimeMs(item.timestamp); return timeMs !== null && timeMs >= Date.parse(challenge.publishedAt); })
+    .sort((a, b) => (submissionTimeMs(a.timestamp) ?? 0) - (submissionTimeMs(b.timestamp) ?? 0))[0];
   return match ? { kind: "verified", submission: match } : { kind: "not_found", reason: "no_eligible_submission_in_available_feed" };
 }
