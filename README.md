@@ -4,22 +4,23 @@ The repository is split into a Next.js frontend and an Express/TypeScript backen
 
 ## Deploying to Render
 
-The repository ships a [`render.yaml`](./render.yaml) blueprint that defines both
-services:
+The frontend is deployed on Vercel; Render hosts the backend API. The
+[`render.yaml`](./render.yaml) blueprint defines:
 
-- `leet-frontend` — Next.js web service (`rootDir: frontend/app`)
 - `leet-backend` — Express API web service (`rootDir: backend`)
 
 To deploy: push this repo, then in the Render dashboard choose **New → Blueprint**
-and point it at the repo. Render builds each service with `npm ci && npm run build`
+and point it at the repo. Render builds the service with `npm ci && npm run build`
 and starts it with `npm run start`.
 
-Set the `sync: false` secrets (`NEXT_PUBLIC_SUPABASE_URL`,
-`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) in the
-dashboard. If Render assigns a service name with a suffix, update
-`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`, and `FRONTEND_ORIGIN` to the real
-`*.onrender.com` URLs. The `leet-worker` background worker is included as a
-commented block because Render requires a paid instance type for workers.
+During setup, set the `sync: false` values:
+
+- `FRONTEND_ORIGIN` — your Vercel URL (e.g. `https://leet.vercel.app`)
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+On the Vercel side, set `NEXT_PUBLIC_API_URL` to the backend's
+`https://<name>.onrender.com` URL. The `leet-worker` background worker is included
+as a commented block because Render requires a paid instance type for workers.
 
 ## Local development
 

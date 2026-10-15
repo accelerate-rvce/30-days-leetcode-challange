@@ -1,30 +1,5 @@
 services:
   - type: web
-    name: leet-frontend
-    runtime: node
-    plan: free
-    rootDir: frontend/app
-    buildCommand: npm ci && npm run build
-    startCommand: npm run start
-    healthCheckPath: /
-    autoDeploy: true
-    envVars:
-      - key: NODE_VERSION
-        value: 22.22.2
-      # Public URLs. If Render appends a suffix to a service name, update these
-      # to the actual onrender.com URLs shown in the dashboard.
-      - key: NEXT_PUBLIC_API_URL
-        value: https://leet-backend.onrender.com
-      - key: NEXT_PUBLIC_SITE_URL
-        value: https://leet-frontend.onrender.com
-      - key: NEXT_PUBLIC_DEMO_ROLE
-        value: student
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-
-  - type: web
     name: leet-backend
     runtime: node
     plan: free
@@ -36,9 +11,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.22.2
-      # Comma-separated list of allowed browser origins.
+      # Your deployed frontend origin (Vercel). Comma-separate to allow several,
+      # e.g. https://leet.vercel.app,https://leet-git-main.vercel.app
       - key: FRONTEND_ORIGIN
-        value: https://leet-frontend.onrender.com
+        sync: false
       - key: CHALLENGE_TIMEZONE
         value: Asia/Kolkata
       - key: LEETCODE_GRAPHQL_URL
