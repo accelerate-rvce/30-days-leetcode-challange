@@ -31,6 +31,7 @@ export default function Home() {
   const view = viewFor(pathname);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [introComplete, setIntroComplete] = useState(false);
   const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>("welcome");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,6 +48,11 @@ export default function Home() {
   const [academicYear, setAcademicYear] = useState("First Year");
   const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   const token = session?.access_token;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIntroComplete(true), 2400);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!supabase) { setAuthLoading(false); return; }
@@ -84,12 +90,9 @@ export default function Home() {
   }, [api, authLoading, token]);
 
   useEffect(() => {
-    if (!session && !authLoading && onboardingStage === "loading") {
-      const timer = window.setTimeout(() => setOnboardingStage("welcome"), 2400);
-      return () => window.clearTimeout(timer);
-    }
+    if (introComplete && !session && !authLoading && onboardingStage === "loading") setOnboardingStage("welcome");
     if (session && progress) setOnboardingStage(progress.profile.leetcode_username ? "ready" : "waitlist");
-  }, [authLoading, onboardingStage, progress, session]);
+  }, [authLoading, introComplete, onboardingStage, progress, session]);
 
   async function signIn() {
     if (!supabase) { setError("Authentication is not configured."); return; }
@@ -102,7 +105,7 @@ export default function Home() {
     if (!supabase) return;
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) setError("Couldn’t sign you out. Please try again.");
-    else { setSession(null); setProgress(null); setChallenge(null); setOnboardingStage("loading"); }
+    else { setSession(null); setProgress(null); setChallenge(null); setOnboardingStage("loading"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
   }
 
   async function recordAndSolve() {
@@ -134,7 +137,7 @@ export default function Home() {
   const verified = useMemo(() => progress?.statuses.filter((item) => item.status === "verified") ?? [], [progress]);
   const selectedChallenge = challenges.find((item) => item.id === selectedChallengeId) ?? challenge;
 
-  if (authLoading) return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#f3f5ef" highlightColor="#c6ff4d" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE CLUB INITIATIVE</p></div></main>;
+  if (!introComplete || authLoading) return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#f3f5ef" highlightColor="#c6ff4d" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE CLUB INITIATIVE</p></div></main>;
   if (!session) {
     if (onboardingStage === "loading") return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#f3f5ef" highlightColor="#c6ff4d" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE CLUB INITIATIVE</p></div></main>;
     if (onboardingStage === "welcome") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content welcome-content"><p className="onboarding-kicker">WELCOME, RVIANS</p><h1>Make a habit of solving.</h1><p className="onboarding-copy">Accelerate Club invites you to a focused 30-day LeetCode challenge for RVCE students.</p><button className="primary-button onboarding-action" onClick={() => setOnboardingStage("briefing")}>See how the challenge works <span>→</span></button></div></section></main>;
