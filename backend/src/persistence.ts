@@ -186,6 +186,43 @@ export async function writeAdminAuditLog(adminProfileId: string, entry: { action
   if (error) throw error;
 }
 
+export async function createAdminChallenge(input: { day: number; title: string; slug: string; difficulty: string; topic: string; points: number; published_at: string; deadline_at: string }) {
+  if (!db) return null;
+  const { data, error } = await db.from("challenges").insert(input).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
+  if (error) throw error;
+  return data;
+}
+
+export type SiteSettings = { waitlistEnabled: boolean; message: string; launchAt: string | null };
+
+export async function getSiteSettings(): Promise<SiteSettings> {
+  const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null };
+  if (!db) return defaults;
+  const { data, error } = await db.from("site_settings").select("key,value");
+  if (error) throw error;
+  const map = new Map((data ?? []).map((row) => [row.key as string, row.value]));
+  const message = map.get("waitlist_message");
+  const launchAt = map.get("launch_at");
+  return {
+    waitlistEnabled: map.get("waitlist_enabled") === true,
+    message: typeof message === "string" ? message : "",
+    launchAt: typeof launchAt === "string" ? launchAt : null,
+  };
+}
+
+export async function updateSiteSettings(patch: { waitlistEnabled?: boolean; message?: string; launchAt?: string | null }): Promise<SiteSettings> {
+  if (!db) throw new Error("persistence_not_configured");
+  const rows: { key: string; value: unknown }[] = [];
+  if (patch.waitlistEnabled !== undefined) rows.push({ key: "waitlist_enabled", value: patch.waitlistEnabled });
+  if (patch.message !== undefined) rows.push({ key: "waitlist_message", value: patch.message });
+  if (patch.launchAt !== undefined) rows.push({ key: "launch_at", value: patch.launchAt });
+  for (const row of rows) {
+    const { error } = await db.from("site_settings").upsert({ key: row.key, value: row.value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) throw error;
+  }
+  return getSiteSettings();
+}
+
 export async function updateAdminChallenge(challengeId: string, updates: { title?: string; slug?: string; difficulty?: string; topic?: string; points?: number; published_at?: string; deadline_at?: string }) {
   if (!db) return null;
   const { data, error } = await db.from("challenges").update(updates).eq("id", challengeId).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
