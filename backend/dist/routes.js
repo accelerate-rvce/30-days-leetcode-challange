@@ -100,9 +100,18 @@ router.get("/leaderboard", async (req, res) => {
     const rows = (await (0, persistence_js_1.getPersistentLeaderboard)(String(req.query.search ?? "").toLowerCase())) ?? [];
     return res.json({ currentDay: rows.length ? 0 : null, totalParticipants: rows.length, verifiedCompletions: 0, updatedAt: new Date().toISOString(), rows });
 });
-router.get("/jobs/metrics", async (_req, res) => {
+router.get("/jobs/metrics", async (req, res) => {
     if (!persistence_js_1.persistenceEnabled)
         return res.status(503).json({ error: "persistence_not_configured" });
+    if (!await (0, persistence_js_1.adminIdFromAccessToken)(authToken(req.header("authorization"))))
+        return res.status(403).json({ error: "admin_access_required" });
     return res.json({ ...(await (0, persistence_js_1.getPersistentJobMetrics)()), paused: false, pausedUntil: null, recentAlerts: [] });
+});
+router.get("/admin/metrics", async (req, res) => {
+    if (!persistence_js_1.persistenceEnabled)
+        return res.status(503).json({ error: "persistence_not_configured" });
+    if (!await (0, persistence_js_1.adminIdFromAccessToken)(authToken(req.header("authorization"))))
+        return res.status(403).json({ error: "admin_access_required" });
+    return res.json(await (0, persistence_js_1.getPersistentAdminMetrics)());
 });
 exports.default = router;

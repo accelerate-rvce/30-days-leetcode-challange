@@ -7,6 +7,8 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export const persistenceEnabled = Boolean(url && serviceRoleKey);
 export const db: SupabaseClient | null = persistenceEnabled ? createClient(url!, serviceRoleKey!, { auth: { autoRefreshToken: false, persistSession: false } }) : null;
 
+const configuredAdminEmails = new Set((process.env.ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
+
 export type ClaimedJob = {
   id: string;
   profile_id: string;
@@ -23,20 +25,31 @@ export async function userIdFromAccessToken(token?: string) {
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) return null;
   const user = data.user;
-  await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "First Year" }, { onConflict: "id", ignoreDuplicates: true });
+  const { data: existingProfile } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const isConfiguredAdmin = Boolean(user.email && configuredAdminEmails.has(user.email.toLowerCase()));
+  if (isConfiguredAdmin && existingProfile && existingProfile.role !== "admin") await db.from("profiles").update({ role: "admin" }).eq("id", user.id);
+  await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "First Year", ...(isConfiguredAdmin ? { role: "admin" } : {}) }, { onConflict: "id", ignoreDuplicates: true });
   return user.id;
+}
+
+export async function adminIdFromAccessToken(token?: string) {
+  const profileId = await userIdFromAccessToken(token);
+  if (!profileId || !db) return null;
+  const { data, error } = await db.from("profiles").select("role").eq("id", profileId).single();
+  if (error || data?.role !== "admin") return null;
+  return profileId;
 }
 
 export async function getPersistentProfile(profileId: string) {
   if (!db) return null;
-  const { data, error } = await db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak").eq("id", profileId).single();
+  const { data, error } = await db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").eq("id", profileId).single();
   if (error) throw error;
   return data;
 }
 
 export async function updatePersistentProfile(profileId: string, updates: { name?: string; leetcode_username?: string; academic_year?: string }) {
   if (!db) return null;
-  const { data, error } = await db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak").single();
+  const { data, error } = await db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").single();
   if (error) throw error;
   return data;
 }
@@ -77,7 +90,7 @@ export async function getPersistentChallenges() {
 export async function getPersistentProgress(profileId: string) {
   if (!db) return null;
   const [{ data: profile, error: profileError }, { data: completions, error: completionError }] = await Promise.all([
-    db.from("profiles").select("id,name,leetcode_username,academic_year,points").eq("id", profileId).single(),
+    db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").eq("id", profileId).single(),
     db.from("completions").select("id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,evidence").eq("profile_id", profileId).order("attempted_at", { ascending: false }),
   ]);
   if (profileError) throw profileError;
@@ -102,6 +115,18 @@ export async function getPersistentJobMetrics() {
   if (error) throw error;
   const rows = data ?? [];
   return { queued: rows.filter((row) => row.status === "queued").length, processing: rows.filter((row) => row.status === "processing").length, retrying: rows.filter((row) => row.status === "retry").length, terminalFailures: rows.filter((row) => row.status === "failed").length };
+}
+
+export async function getPersistentAdminMetrics() {
+  if (!db) return null;
+  const [{ count: participantCount, error: participantError }, { count: verifiedCount, error: verifiedError }, jobs] = await Promise.all([
+    db.from("profiles").select("id", { count: "exact", head: true }).neq("role", "admin"),
+    db.from("completions").select("id", { count: "exact", head: true }).eq("status", "verified"),
+    getPersistentJobMetrics(),
+  ]);
+  if (participantError) throw participantError;
+  if (verifiedError) throw verifiedError;
+  return { health: "Online", participants: participantCount ?? 0, verified: verifiedCount ?? 0, queued: (jobs?.queued ?? 0) + (jobs?.retrying ?? 0), failed: jobs?.terminalFailures ?? 0 };
 }
 
 export async function enqueuePersistentVerification(profileId: string, challengeId: string) {

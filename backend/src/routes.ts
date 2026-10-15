@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, persistenceEnabled, recordPersistentAttempt, updatePersistentProfile, userIdFromAccessToken } from "./persistence.js";
+import { adminIdFromAccessToken, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, persistenceEnabled, recordPersistentAttempt, updatePersistentProfile, userIdFromAccessToken } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 
 const router = Router();
@@ -84,9 +84,16 @@ router.get("/leaderboard", async (req, res) => {
   return res.json({ currentDay: rows.length ? 0 : null, totalParticipants: rows.length, verifiedCompletions: 0, updatedAt: new Date().toISOString(), rows });
 });
 
-router.get("/jobs/metrics", async (_req, res) => {
+router.get("/jobs/metrics", async (req, res) => {
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  if (!await adminIdFromAccessToken(authToken(req.header("authorization")))) return res.status(403).json({ error: "admin_access_required" });
   return res.json({ ...(await getPersistentJobMetrics()), paused: false, pausedUntil: null, recentAlerts: [] });
+});
+
+router.get("/admin/metrics", async (req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  if (!await adminIdFromAccessToken(authToken(req.header("authorization")))) return res.status(403).json({ error: "admin_access_required" });
+  return res.json(await getPersistentAdminMetrics());
 });
 
 export default router;

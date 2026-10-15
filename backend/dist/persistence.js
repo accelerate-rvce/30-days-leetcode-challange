@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.db = exports.persistenceEnabled = void 0;
 exports.userIdFromAccessToken = userIdFromAccessToken;
+exports.adminIdFromAccessToken = adminIdFromAccessToken;
 exports.getPersistentProfile = getPersistentProfile;
 exports.updatePersistentProfile = updatePersistentProfile;
 exports.recordPersistentAttempt = recordPersistentAttempt;
@@ -11,6 +12,7 @@ exports.getPersistentChallenges = getPersistentChallenges;
 exports.getPersistentProgress = getPersistentProgress;
 exports.getPersistentLeaderboard = getPersistentLeaderboard;
 exports.getPersistentJobMetrics = getPersistentJobMetrics;
+exports.getPersistentAdminMetrics = getPersistentAdminMetrics;
 exports.enqueuePersistentVerification = enqueuePersistentVerification;
 exports.enqueueDuePersistentVerifications = enqueueDuePersistentVerifications;
 exports.claimPersistentJobs = claimPersistentJobs;
@@ -23,6 +25,7 @@ const url = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 exports.persistenceEnabled = Boolean(url && serviceRoleKey);
 exports.db = exports.persistenceEnabled ? (0, supabase_js_1.createClient)(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } }) : null;
+const configuredAdminEmails = new Set((process.env.ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
 async function userIdFromAccessToken(token) {
     if (!exports.db || !token)
         return null;
@@ -30,13 +33,26 @@ async function userIdFromAccessToken(token) {
     if (error || !data.user)
         return null;
     const user = data.user;
-    await exports.db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "First Year" }, { onConflict: "id", ignoreDuplicates: true });
+    const { data: existingProfile } = await exports.db.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    const isConfiguredAdmin = Boolean(user.email && configuredAdminEmails.has(user.email.toLowerCase()));
+    if (isConfiguredAdmin && existingProfile && existingProfile.role !== "admin")
+        await exports.db.from("profiles").update({ role: "admin" }).eq("id", user.id);
+    await exports.db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "First Year", ...(isConfiguredAdmin ? { role: "admin" } : {}) }, { onConflict: "id", ignoreDuplicates: true });
     return user.id;
+}
+async function adminIdFromAccessToken(token) {
+    const profileId = await userIdFromAccessToken(token);
+    if (!profileId || !exports.db)
+        return null;
+    const { data, error } = await exports.db.from("profiles").select("role").eq("id", profileId).single();
+    if (error || data?.role !== "admin")
+        return null;
+    return profileId;
 }
 async function getPersistentProfile(profileId) {
     if (!exports.db)
         return null;
-    const { data, error } = await exports.db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak").eq("id", profileId).single();
+    const { data, error } = await exports.db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").eq("id", profileId).single();
     if (error)
         throw error;
     return data;
@@ -44,7 +60,7 @@ async function getPersistentProfile(profileId) {
 async function updatePersistentProfile(profileId, updates) {
     if (!exports.db)
         return null;
-    const { data, error } = await exports.db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak").single();
+    const { data, error } = await exports.db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").single();
     if (error)
         throw error;
     return data;
@@ -88,7 +104,7 @@ async function getPersistentProgress(profileId) {
     if (!exports.db)
         return null;
     const [{ data: profile, error: profileError }, { data: completions, error: completionError }] = await Promise.all([
-        exports.db.from("profiles").select("id,name,leetcode_username,academic_year,points").eq("id", profileId).single(),
+        exports.db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").eq("id", profileId).single(),
         exports.db.from("completions").select("id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,evidence").eq("profile_id", profileId).order("attempted_at", { ascending: false }),
     ]);
     if (profileError)
@@ -118,6 +134,20 @@ async function getPersistentJobMetrics() {
         throw error;
     const rows = data ?? [];
     return { queued: rows.filter((row) => row.status === "queued").length, processing: rows.filter((row) => row.status === "processing").length, retrying: rows.filter((row) => row.status === "retry").length, terminalFailures: rows.filter((row) => row.status === "failed").length };
+}
+async function getPersistentAdminMetrics() {
+    if (!exports.db)
+        return null;
+    const [{ count: participantCount, error: participantError }, { count: verifiedCount, error: verifiedError }, jobs] = await Promise.all([
+        exports.db.from("profiles").select("id", { count: "exact", head: true }).neq("role", "admin"),
+        exports.db.from("completions").select("id", { count: "exact", head: true }).eq("status", "verified"),
+        getPersistentJobMetrics(),
+    ]);
+    if (participantError)
+        throw participantError;
+    if (verifiedError)
+        throw verifiedError;
+    return { health: "Online", participants: participantCount ?? 0, verified: verifiedCount ?? 0, queued: (jobs?.queued ?? 0) + (jobs?.retrying ?? 0), failed: jobs?.terminalFailures ?? 0 };
 }
 async function enqueuePersistentVerification(profileId, challengeId) {
     if (!exports.db)

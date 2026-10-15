@@ -6,11 +6,12 @@ import { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import ParticleText from "../components/ParticleText";
 
-type View = "overview" | "challenge" | "progress" | "leaderboard" | "resources" | "support";
+type View = "overview" | "challenge" | "progress" | "leaderboard" | "resources" | "support" | "admin";
 type OnboardingStage = "loading" | "welcome" | "briefing" | "signin" | "waitlist" | "ready";
 type Challenge = { id: string; day: number; title: string; slug: string; difficulty: string; topic: string; points: number; publishedAt: string; deadlineAt: string };
-type Progress = { profile: { name: string; points: number; streak?: number; leetcode_username?: string; academic_year?: string; academicYear?: string }; verifiedCompletions: number; completionPercentage: number; statuses: { challenge_id: string; status: string; awarded_points?: number }[] };
+type Progress = { profile: { name: string; points: number; streak?: number; leetcode_username?: string; academic_year?: string; academicYear?: string; role?: "student" | "admin" }; verifiedCompletions: number; completionPercentage: number; statuses: { challenge_id: string; status: string; awarded_points?: number }[] };
 type LeaderboardRow = { rank: number; name: string; handle: string; academicYear: string; points: number; streak: number; solved: number };
+type AdminMetrics = { health: string; participants: number; verified: number; queued: number; failed: number };
 
 const resources = [
   { category: "DSA Roadmaps & Problem Sheets", title: "Striver's A2Z DSA Sheet", detail: "A structured DSA course and practice sheet.", kind: "Roadmap", href: "https://takeuforward.org/strivers-a2z-dsa-course/strivers-a2z-dsa-course-sheet-2" },
@@ -30,6 +31,7 @@ function viewFor(pathname: string): View {
   if (pathname === "/leaderboard") return "leaderboard";
   if (pathname === "/resources") return "resources";
   if (pathname === "/support") return "support";
+  if (pathname === "/admin") return "admin";
   return "overview";
 }
 
@@ -59,6 +61,8 @@ export default function Home() {
   const [waitlistName, setWaitlistName] = useState("");
   const [academicYear, setAcademicYear] = useState("First Year");
   const [resourceQuery, setResourceQuery] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminMetrics, setAdminMetrics] = useState<AdminMetrics | null>(null);
   const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   const token = session?.access_token;
 
@@ -89,10 +93,15 @@ export default function Home() {
         if (progressResponse.ok) {
           const nextProgress = await progressResponse.json() as Progress;
           setProgress(nextProgress);
+          setIsAdmin(nextProgress.profile.role === "admin");
           setLeetcodeHandle(nextProgress.profile.leetcode_username ?? "");
           setWaitlistName(nextProgress.profile.name ?? "");
           setAcademicYear(nextProgress.profile.academic_year ?? "First Year");
           setAttemptRecorded(nextProgress.statuses.some((item) => item.challenge_id === challengeBody.challenge?.id));
+          if (nextProgress.profile.role === "admin") {
+            const adminResponse = await fetch(`${api}/api/admin/metrics`, { headers });
+            if (adminResponse.ok) setAdminMetrics(await adminResponse.json() as AdminMetrics);
+          }
         }
         if (leaderboardResponse.ok) setLeaderboard((await leaderboardResponse.json() as { rows: LeaderboardRow[] }).rows ?? []);
         if (challengesResponse.ok) { const list = (await challengesResponse.json() as { challenges: Challenge[] }).challenges ?? []; setChallenges(list); setSelectedChallengeId(challengeBody.challenge?.id ?? list[0]?.id ?? ""); }
@@ -105,7 +114,8 @@ export default function Home() {
   useEffect(() => {
     if (introComplete && !session && !authLoading && onboardingStage === "loading") setOnboardingStage("welcome");
     if (session && progress) setOnboardingStage(progress.profile.leetcode_username ? "ready" : "waitlist");
-  }, [authLoading, introComplete, onboardingStage, progress, session]);
+    if (session && progress && pathname === "/admin" && progress.profile.role !== "admin") router.replace("/");
+  }, [authLoading, introComplete, onboardingStage, pathname, progress, router, session]);
 
   async function signIn() {
     if (!supabase) { setError("Authentication is not configured."); return; }
@@ -118,7 +128,7 @@ export default function Home() {
     if (!supabase) return;
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) setError("Couldn’t sign you out. Please try again.");
-    else { setSession(null); setProgress(null); setChallenge(null); setOnboardingStage("loading"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
+    else { setSession(null); setProgress(null); setChallenge(null); setAdminMetrics(null); setIsAdmin(false); setOnboardingStage("loading"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
   }
 
   async function recordAndSolve() {
@@ -163,8 +173,8 @@ export default function Home() {
   if (loading) return <main className="onboarding-shell"><section className="onboarding-card"><p className="onboarding-kicker">30DAYS</p><h1>Loading your challenge data…</h1></section></main>;
   if (onboardingStage === "waitlist") return <WaitlistDetails name={waitlistName} setName={setWaitlistName} handle={leetcodeHandle} setHandle={setLeetcodeHandle} academicYear={academicYear} setAcademicYear={setAcademicYear} saving={savingProfile} onSave={saveProfile} error={error} />;
 
-  const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }];
-  const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "challenge" ? "TODAY’S QUESTION" : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : "COMMAND CENTER";
+  const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : [])];
+  const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "challenge" ? "TODAY’S QUESTION" : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : view === "admin" ? "ADMIN MONITORING" : "COMMAND CENTER";
 
   return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark">30</span><div><strong>30DAYS</strong><small>COLLEGE SPRINT</small></div></div><div className="live-pill"><span className="pulse" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => router.push(item.path)}>{item.label}</button>)}</nav><div className="top-actions"><div className="user-avatar">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</div><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> 30-DAY LEETCODE SPRINT</div><h1>{title}</h1><p>Live data only. Verification may take a few minutes after submission.</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
     {view === "overview" && <><section className="metrics-grid"><Metric label="CURRENT CHALLENGE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "—"} detail={challenge?.title ?? "No challenge published"} /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="VERIFIED SOLVES" value={String(progress?.verifiedCompletions ?? 0)} detail="Across this sprint" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" /></section><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); router.push("/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /><ChallengeHistory challenges={challenges} onSelect={(id) => { setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((item) => item.challenge_id === id) ?? false); router.push("/challenge"); }} /></>}
@@ -173,6 +183,7 @@ export default function Home() {
     {view === "leaderboard" && <Leaderboard rows={leaderboard} />}
     {view === "resources" && <Resources query={resourceQuery} setQuery={setResourceQuery} filtered={filteredResources} />}
     {view === "support" && <Support />}
+    {view === "admin" && isAdmin && <AdminView metrics={adminMetrics} onReturn={() => router.push("/")} />}
   </main><footer><span>30DAYS // COLLEGE SPRINT</span><span>LIVE DATABASE</span></footer></div>;
 }
 
@@ -186,6 +197,7 @@ function Leaderboard({ rows }: { rows: LeaderboardRow[] }) { const podiumRows = 
 function PodiumCard({ row, place }: { row: LeaderboardRow; place: "first" | "second" | "third" }) { const initials = row.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase(); const tier = place === "first" ? "GOLD" : place === "second" ? "SILVER" : "BRONZE"; return <article className={`podium podium-${place}`}><div className="podium-topline" /><div className="podium-rank">0{row.rank}</div><div className="podium-tier">{tier} TIER</div><div className="podium-person"><div className="avatar">{initials}</div><div><h3>{row.name}</h3><p>{row.academicYear} · {row.handle}</p></div></div><div className="podium-stats"><span><b>{row.solved}</b> SOLVED</span><span><b>{row.streak}D</b> STREAK</span><span><b>{row.points}</b> SCORE</span></div></article>; }
 function Resources({ query, setQuery, filtered }: { query: string; setQuery: (value: string) => void; filtered: ReadonlyArray<typeof resources[number]> }) { return <section className="resources-page"><div className="resource-controls"><div><span className="resource-count">{filtered.length} resources</span><p>Each link opens in a new tab. Save the paths that fit your current weak spot.</p></div><label className="search-box resource-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search topics or source" aria-label="Search resources" /></label></div>{["DSA Roadmaps & Problem Sheets", "YouTube Learning Resources"].map((category) => { const items = filtered.filter((resource) => resource.category === category); return <section className="resource-section" key={category}><div className="resource-section-heading"><h2>{category}</h2><span>{items.length} listed</span></div>{items.length ? <div className="resource-grid">{items.map((resource) => <article className="resource-card" key={resource.title}><div className="resource-card-top"><span className={`resource-kind ${resource.href ? "" : "pending"}`}>{resource.kind}</span><span aria-hidden="true">{resource.href ? "↗" : "· · ·"}</span></div><h3>{resource.title}</h3><p>{resource.detail}</p>{resource.href ? <a href={resource.href} target="_blank" rel="noreferrer" className="resource-link">Open resource <span>↗</span></a> : <span className="resource-unavailable">Link pending verification</span>}</article>)}</div> : <div className="resource-empty"><strong>No resources match “{query}”.</strong><button className="text-button" onClick={() => setQuery("")}>Clear search</button></div>}</section>; })}</section>; }
 function Support() { return <section className="support-layout"><div className="support-main"><article className="panel support-card"><div className="eyebrow">SUPPORT DESK</div><h2>Ask the cohort team</h2><p>Click either support contact to open Gmail with a pre-filled subject. Include your RVCE email, LeetCode username, and the challenge day when reporting a verification issue.</p>{supportEmails.length ? supportEmails.map((email) => <a className="contact-person support-email" href={`mailto:${email}?subject=30DAYS%20support%20query`} key={email}><div className="avatar">@</div><div><strong>{email}</strong><small>Open Gmail to send a query</small></div><span className="status-dot" /></a>) : <div className="resource-empty"><strong>Support contacts are not configured yet.</strong><span className="empty-copy">Set NEXT_PUBLIC_SUPPORT_EMAIL_ONE and NEXT_PUBLIC_SUPPORT_EMAIL_TWO.</span></div>}</article></div><aside className="support-side"><article className="panel access-card"><div className="lock-mark">↗</div><div><div className="eyebrow">VERIFICATION SUPPORT</div><h2>Live data, human help.</h2><p>Points are protected by one-time awards. The support team can investigate a delayed verification without changing your score from the browser.</p></div></article></aside></section>; }
+function AdminView({ metrics, onReturn }: { metrics: AdminMetrics | null; onReturn: () => void }) { return <section className="admin-page"><section className="leaderboard-metrics"><Metric label="BACKEND HEALTH" value={metrics?.health ?? "Checking"} detail="API and worker availability" accent /><Metric label="ACTIVE PARTICIPANTS" value={String(metrics?.participants ?? "—")} detail="Persisted student profiles" accent /><Metric label="VERIFIED COMPLETIONS" value={String(metrics?.verified ?? "—")} detail="Persisted verification results" accent /><Metric label="WAITING / RETRYING" value={String(metrics?.queued ?? "—")} detail="Jobs needing worker attention" /></section><article className="panel admin-explainer"><div><div className="eyebrow">OPERATIONS VIEW</div><h2>Verification is asynchronous</h2><p>These totals are read from the protected backend. Students cannot access this page or its metrics, even if they manually enter the admin URL.</p><div className="admin-status-row"><span><span className="status-dot" /> {metrics?.failed ?? "—"} terminal failures</span><span>Admin-only data</span></div></div><button className="secondary-button" onClick={onReturn}>Return to dashboard</button></article></section>; }
 function EmptyPanel({ title, copy }: { title: string; copy: string }) { return <article className="panel empty-state"><h2>{title}</h2><p className="empty-copy">{copy}</p></article>; }
 function ProfileSetup({ handle, setHandle, saving, onSave }: { handle: string; setHandle: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void }) { return <article className="panel profile-setup"><div><div className="eyebrow">ONE-TIME SETUP</div><h2>Connect your LeetCode profile</h2><p className="empty-copy">Paste your username or profile URL. We use it to verify accepted submissions.</p></div><form className="inline-form" onSubmit={onSave}><label htmlFor="leetcode-handle">LeetCode username or profile URL</label><input id="leetcode-handle" value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="https://leetcode.com/u/username" required /><button className="primary-button" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></article>; }
 function WaitlistDetails({ name, setName, handle, setHandle, academicYear, setAcademicYear, saving, onSave, error }: { name: string; setName: (value: string) => void; handle: string; setHandle: (value: string) => void; academicYear: string; setAcademicYear: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void; error: string }) { return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">JOIN THE SPRINT</p><h1>Tell us where you are starting.</h1><p className="onboarding-copy">These details connect your verified work to your challenge record.</p>{error && <p className="form-error" role="alert">{error}</p>}<form className="onboarding-form" onSubmit={onSave}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label><label>LeetCode username or profile URL<input value={handle} onChange={(event) => setHandle(event.target.value)} autoComplete="url" placeholder="https://leetcode.com/u/username" required /></label><label>Academic year<select value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}><option>First Year</option><option>Second Year</option><option>Third Year</option><option>Fourth Year</option></select></label><button className="primary-button onboarding-action" type="submit" disabled={saving}>{saving ? "Saving…" : "Join the sprint"} <span>→</span></button></form></div></section></main>; }
