@@ -2,6 +2,25 @@
 
 The repository is split into a Next.js frontend and an Express/TypeScript backend.
 
+## Deploying to Render
+
+The repository ships a [`render.yaml`](./render.yaml) blueprint that defines both
+services:
+
+- `leet-frontend` — Next.js web service (`rootDir: frontend/app`)
+- `leet-backend` — Express API web service (`rootDir: backend`)
+
+To deploy: push this repo, then in the Render dashboard choose **New → Blueprint**
+and point it at the repo. Render builds each service with `npm ci && npm run build`
+and starts it with `npm run start`.
+
+Set the `sync: false` secrets (`NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) in the
+dashboard. If Render assigns a service name with a suffix, update
+`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`, and `FRONTEND_ORIGIN` to the real
+`*.onrender.com` URLs. The `leet-worker` background worker is included as a
+commented block because Render requires a paid instance type for workers.
+
 ## Local development
 
 ```bash
