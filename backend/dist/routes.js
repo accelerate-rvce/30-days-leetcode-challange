@@ -6,6 +6,18 @@ const persistence_js_1 = require("./persistence.js");
 const persistent_worker_js_1 = require("./persistent-worker.js");
 const router = (0, express_1.Router)();
 const authToken = (value) => value?.replace(/^Bearer\s+/i, "");
+async function requireAdmin(req, res) {
+    if (!persistence_js_1.persistenceEnabled) {
+        res.status(503).json({ error: "persistence_not_configured" });
+        return null;
+    }
+    const adminId = await (0, persistence_js_1.adminIdFromAccessToken)(authToken(req.header("authorization")));
+    if (!adminId) {
+        res.status(403).json({ error: "admin_access_required" });
+        return null;
+    }
+    return adminId;
+}
 function normalizeLeetCodeUsername(value) {
     const input = value.trim().replace(/[\])}>]+$/, "");
     try {
@@ -113,5 +125,100 @@ router.get("/admin/metrics", async (req, res) => {
     if (!await (0, persistence_js_1.adminIdFromAccessToken)(authToken(req.header("authorization"))))
         return res.status(403).json({ error: "admin_access_required" });
     return res.json(await (0, persistence_js_1.getPersistentAdminMetrics)());
+});
+router.get("/admin/overview", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    const [metrics, challenges, users, jobs, logs] = await Promise.all([(0, persistence_js_1.getPersistentAdminMetrics)(), (0, persistence_js_1.getAdminChallenges)(), (0, persistence_js_1.getAdminUsers)(String(req.query.search ?? "")), (0, persistence_js_1.getAdminVerificationJobs)(), (0, persistence_js_1.getAdminAuditLogs)()]);
+    return res.json({ metrics, challenges, users, jobs, logs });
+});
+router.patch("/admin/challenges/:challengeId", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    const parsed = zod_1.z.object({ title: zod_1.z.string().trim().min(1).max(160).optional(), slug: zod_1.z.string().trim().regex(/^[a-z0-9-]+$/).optional(), difficulty: zod_1.z.enum(["Easy", "Medium", "Hard"]).optional(), topic: zod_1.z.string().trim().min(1).max(80).optional(), points: zod_1.z.number().int().positive().max(100).optional(), published_at: zod_1.z.string().datetime({ offset: true }).optional(), deadline_at: zod_1.z.string().datetime({ offset: true }).optional() }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: "invalid_challenge_update" });
+    try {
+        const challenge = await (0, persistence_js_1.updateAdminChallenge)(req.params.challengeId, parsed.data);
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "edit_challenge", status: "success", message: `Updated challenge ${challenge?.title ?? req.params.challengeId}`, targetChallengeId: req.params.challengeId, metadata: parsed.data });
+        return res.json({ challenge });
+    }
+    catch (error) {
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "edit_challenge", status: "error", message: error instanceof Error ? error.message : "challenge_update_failed", targetChallengeId: req.params.challengeId });
+        return res.status(400).json({ error: "challenge_update_failed" });
+    }
+});
+router.post("/admin/challenges/reorder", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    const parsed = zod_1.z.object({ order: zod_1.z.array(zod_1.z.string().uuid()).min(1).max(30) }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: "invalid_challenge_order" });
+    try {
+        await (0, persistence_js_1.reorderAdminChallenges)(parsed.data.order);
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "reorder_challenges", status: "success", message: `Reordered ${parsed.data.order.length} challenges`, metadata: { order: parsed.data.order } });
+        return res.json({ updated: true, challenges: await (0, persistence_js_1.getAdminChallenges)() });
+    }
+    catch (error) {
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "reorder_challenges", status: "error", message: error instanceof Error ? error.message : "challenge_reorder_failed" });
+        return res.status(400).json({ error: "challenge_reorder_failed" });
+    }
+});
+router.post("/admin/verification/start", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    const parsed = zod_1.z.object({ profileId: zod_1.z.string().uuid(), challengeId: zod_1.z.string().uuid() }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: "profileId_and_challengeId_are_required" });
+    try {
+        const job = await (0, persistence_js_1.preparePersistentVerification)(parsed.data.profileId, parsed.data.challengeId);
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "queue_verification", status: "success", message: "Verification job queued", targetProfileId: parsed.data.profileId, targetChallengeId: parsed.data.challengeId, metadata: { jobId: job.id } });
+        return res.status(202).json({ queued: true, job });
+    }
+    catch (error) {
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "queue_verification", status: "error", message: error instanceof Error ? error.message : "verification_queue_failed", targetProfileId: parsed.data.profileId, targetChallengeId: parsed.data.challengeId });
+        return res.status(400).json({ error: "verification_queue_failed" });
+    }
+});
+router.post("/admin/verification/manual", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    const parsed = zod_1.z.object({ profileId: zod_1.z.string().uuid(), challengeId: zod_1.z.string().uuid(), submissionId: zod_1.z.string().trim().min(1).max(200), submissionAt: zod_1.z.string().trim().min(1) }).safeParse(req.body);
+    if (!parsed.success || !Number.isFinite(Date.parse(parsed.data.submissionAt)))
+        return res.status(400).json({ error: "valid_submission_details_are_required" });
+    try {
+        const result = await (0, persistence_js_1.manuallyVerifyPersistentCompletion)(parsed.data.profileId, parsed.data.challengeId, parsed.data.submissionId, new Date(parsed.data.submissionAt).toISOString());
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "manual_verification", status: "success", message: result.changed ? `Manually verified and awarded ${result.awardedPoints} points` : "Already verified; no duplicate points awarded", targetProfileId: parsed.data.profileId, targetChallengeId: parsed.data.challengeId, metadata: { submissionId: parsed.data.submissionId, changed: result.changed, awardedPoints: result.awardedPoints } });
+        return res.json({ verified: result.changed, duplicate: !result.changed, awardedPoints: result.changed ? result.awardedPoints : 0 });
+    }
+    catch (error) {
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "manual_verification", status: "error", message: error instanceof Error ? error.message : "manual_verification_failed", targetProfileId: parsed.data.profileId, targetChallengeId: parsed.data.challengeId });
+        return res.status(400).json({ error: "manual_verification_failed" });
+    }
+});
+router.post("/admin/verification/run", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    try {
+        const result = await (0, persistent_worker_js_1.runPersistentVerificationCycle)();
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "run_verification_cycle", status: "success", message: result.running ? "Verification cycle is already running" : `Verification cycle processed ${result.claimed} jobs`, metadata: result });
+        return res.status(202).json(result);
+    }
+    catch (error) {
+        await (0, persistence_js_1.writeAdminAuditLog)(adminId, { action: "run_verification_cycle", status: "error", message: error instanceof Error ? error.message : "verification_cycle_failed" });
+        return res.status(500).json({ error: "verification_cycle_failed" });
+    }
+});
+router.get("/admin/logs", async (req, res) => {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId)
+        return;
+    return res.json({ logs: await (0, persistence_js_1.getAdminAuditLogs)(Number(req.query.limit ?? 100)) });
 });
 exports.default = router;

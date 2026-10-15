@@ -135,6 +135,91 @@ export async function getPersistentAdminMetrics() {
   return { health: "Online", participants: participantCount ?? 0, verified: verifiedCount ?? 0, queued: (jobs?.queued ?? 0) + (jobs?.retrying ?? 0), failed: jobs?.terminalFailures ?? 0 };
 }
 
+export async function getAdminChallenges() {
+  if (!db) return [];
+  const { data, error } = await db.from("challenges").select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").order("day", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getAdminUsers(query = "") {
+  if (!db) return [];
+  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").neq("role", "admin").order("points", { ascending: false }).limit(200);
+  const safeQuery = query.replace(/[,%()]/g, "");
+  if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
+  const [{ data, error }, { data: completions, error: completionError }] = await Promise.all([
+    request,
+    db.from("completions").select("profile_id").eq("status", "verified"),
+  ]);
+  if (error) throw error;
+  if (completionError) throw completionError;
+  const solved = new Map<string, number>();
+  for (const completion of completions ?? []) solved.set(completion.profile_id, (solved.get(completion.profile_id) ?? 0) + 1);
+  return (data ?? []).map((profile) => ({ ...profile, solved: solved.get(profile.id) ?? 0 }));
+}
+
+export async function getAdminVerificationJobs(limit = 100) {
+  if (!db) return [];
+  const { data, error } = await db.from("verification_jobs").select("id,profile_id,challenge_id,status,attempts,available_at,locked_at,last_error,created_at").order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  const profileIds = [...new Set((data ?? []).map((job) => job.profile_id))];
+  const challengeIds = [...new Set((data ?? []).map((job) => job.challenge_id))];
+  const [{ data: profiles }, { data: challenges }] = await Promise.all([
+    profileIds.length ? db.from("profiles").select("id,name,leetcode_username").in("id", profileIds) : Promise.resolve({ data: [] }),
+    challengeIds.length ? db.from("challenges").select("id,day,title,slug").in("id", challengeIds) : Promise.resolve({ data: [] }),
+  ]);
+  const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  const challengeMap = new Map((challenges ?? []).map((challenge) => [challenge.id, challenge]));
+  return (data ?? []).map((job) => ({ ...job, profile: profileMap.get(job.profile_id) ?? null, challenge: challengeMap.get(job.challenge_id) ?? null }));
+}
+
+export async function getAdminAuditLogs(limit = 100) {
+  if (!db) return [];
+  const { data, error } = await db.from("admin_audit_logs").select("id,admin_profile_id,action,target_profile_id,target_challenge_id,status,message,metadata,created_at").order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function writeAdminAuditLog(adminProfileId: string, entry: { action: string; status: "success" | "error" | "info"; message: string; targetProfileId?: string; targetChallengeId?: string; metadata?: Record<string, unknown> }) {
+  if (!db) return;
+  const { error } = await db.from("admin_audit_logs").insert({ admin_profile_id: adminProfileId, action: entry.action, status: entry.status, message: entry.message, target_profile_id: entry.targetProfileId, target_challenge_id: entry.targetChallengeId, metadata: entry.metadata ?? {} });
+  if (error) throw error;
+}
+
+export async function updateAdminChallenge(challengeId: string, updates: { title?: string; slug?: string; difficulty?: string; topic?: string; points?: number; published_at?: string; deadline_at?: string }) {
+  if (!db) return null;
+  const { data, error } = await db.from("challenges").update(updates).eq("id", challengeId).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
+  if (error) throw error;
+  return data;
+}
+
+export async function reorderAdminChallenges(order: string[]) {
+  if (!db) return;
+  const { error } = await db.rpc("admin_reorder_challenges", { p_order: order.map((id) => ({ id })) });
+  if (error) throw error;
+}
+
+export async function preparePersistentVerification(profileId: string, challengeId: string) {
+  if (!db) throw new Error("persistence_not_configured");
+  const { error: completionError } = await db.from("completions").upsert({ profile_id: profileId, challenge_id: challengeId, status: "pending" }, { onConflict: "profile_id,challenge_id", ignoreDuplicates: true });
+  if (completionError) throw completionError;
+  await enqueuePersistentVerification(profileId, challengeId);
+  const { data, error } = await db.from("verification_jobs").select("id,status").eq("profile_id", profileId).eq("challenge_id", challengeId).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function manuallyVerifyPersistentCompletion(profileId: string, challengeId: string, submissionId: string, submissionAt: string) {
+  if (!db) throw new Error("persistence_not_configured");
+  const challenge = await getPersistentChallenge(challengeId);
+  if (!challenge) throw new Error("challenge_not_found");
+  const job = await preparePersistentVerification(profileId, challengeId);
+  const awardedPoints = pointsForCompletion(submissionAt, challenge.deadlineAt);
+  const { data, error } = await db.rpc("finalize_verified_completion", { p_job_id: job.id, p_profile_id: profileId, p_challenge_id: challengeId, p_submission_id: submissionId, p_submission_at: submissionAt, p_awarded_points: awardedPoints, p_evidence: { source: "admin_manual_verification", submissionId } });
+  if (error) throw error;
+  return { changed: Boolean(data), awardedPoints };
+}
+
 export async function enqueuePersistentVerification(profileId: string, challengeId: string) {
   if (!db) return;
   const { error } = await db.rpc("enqueue_verification_job", { p_profile_id: profileId, p_challenge_id: challengeId });
@@ -171,7 +256,7 @@ export async function markPersistentNotFound(job: ClaimedJob, maxRetries: number
   await db.from("verification_jobs").update({
     status: terminal ? "failed" : "retry",
     available_at: new Date(Date.now() + (terminal ? 0 : 15 * 60_000)).toISOString(),
-    last_error: terminal ? "no_matching_accepted_submission" : null,
+    last_error: "no_matching_accepted_submission",
     locked_at: null,
   }).eq("id", job.id);
 }
