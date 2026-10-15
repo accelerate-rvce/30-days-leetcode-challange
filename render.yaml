@@ -23,6 +23,8 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: CRON_SECRET
+        sync: false
 
   # Verification worker. Render background workers require a paid instance
   # type, so this is disabled by default. Uncomment and set the plan to run it.

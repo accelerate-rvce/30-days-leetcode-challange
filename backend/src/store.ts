@@ -1,6 +1,13 @@
 import { AdminAlert, Challenge, Completion, Profile, VerificationJob } from "./types.js";
 
 const istOffsetMs = 5.5 * 60 * 60 * 1000;
+export const ON_TIME_POINTS = 100;
+export const LATE_POINTS = 70;
+
+export function pointsForCompletion(timestamp: string, deadlineAt: string) {
+  return Date.parse(timestamp) <= Date.parse(deadlineAt) ? ON_TIME_POINTS : LATE_POINTS;
+}
+
 function activeWindow() {
   const localNow = new Date(Date.now() + istOffsetMs);
   let deadlineUtc = Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate(), 18, 0, 0) - istOffsetMs;
@@ -8,13 +15,9 @@ function activeWindow() {
   return { publishedAt: new Date(deadlineUtc - 24 * 60 * 60 * 1000).toISOString(), deadlineAt: new Date(deadlineUtc).toISOString() };
 }
 
-export const profiles = new Map<string, Profile>([
-  ["demo-user", { id: "demo-user", name: "Arjun Sharma", handle: "arjun.builds", academicYear: "Third Year", points: 210, streak: 7, longestStreak: 7 }],
-  ["nisha", { id: "nisha", name: "Nisha Kapoor", handle: "nisha.codes", academicYear: "Third Year", points: 262, streak: 7, longestStreak: 7 }],
-  ["devansh", { id: "devansh", name: "Devansh Mehta", handle: "devansh_m", academicYear: "Second Year", points: 248, streak: 7, longestStreak: 7 }],
-]);
+export const profiles = new Map<string, Profile>();
 
-export const challenges = new Map<string, Challenge>([["challenge-07", { id: "challenge-07", day: 7, title: "Two Sum", slug: "two-sum", difficulty: "Easy", topic: "Array · Hash Table", points: 20, ...activeWindow() }]]);
+export const challenges = new Map<string, Challenge>();
 export const completions = new Map<string, Completion>();
 export const jobs = new Map<string, VerificationJob>();
 export const adminAlerts: AdminAlert[] = [];

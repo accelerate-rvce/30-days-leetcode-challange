@@ -1,38 +1,79 @@
 import { Router } from "express";
 import { z } from "zod";
-import { adminAlerts, challenges, completions, findOrCreateCompletion, jobs, profiles, verificationIsPaused, verificationPausedUntil } from "./store.js";
+import { getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, persistenceEnabled, recordPersistentAttempt, updatePersistentProfile, userIdFromAccessToken } from "./persistence.js";
+import { runPersistentVerificationCycle } from "./persistent-worker.js";
 
 const router = Router();
-const demoProfile = () => profiles.get("demo-user")!;
+const authToken = (value?: string) => value?.replace(/^Bearer\s+/i, "");
 
-router.get("/challenges/current", (_req, res) => res.json({ challenge: [...challenges.values()].sort((a, b) => b.day - a.day)[0] }));
-router.post("/events/open", (req, res) => {
+router.get("/challenges/current", async (_req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  return res.json({ challenge: await getPersistentCurrentChallenge() });
+});
+router.get("/challenges", async (_req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  return res.json({ challenges: await getPersistentChallenges() });
+});
+
+router.post("/events/open", async (req, res) => {
   const parsed = z.object({ challengeId: z.string() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "challengeId is required" });
-  if (!challenges.has(parsed.data.challengeId)) return res.status(404).json({ error: "challenge_not_found" });
-  const completion = findOrCreateCompletion(demoProfile().id, parsed.data.challengeId);
-  return res.status(202).json({ recorded: true, status: "attempt_recorded", attemptedAt: completion.attemptedAt, verificationStartsAfter: challenges.get(parsed.data.challengeId)?.deadlineAt });
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  const challenge = await getPersistentChallenge(parsed.data.challengeId);
+  if (!challenge) return res.status(404).json({ error: "challenge_not_found" });
+  const attempt = await recordPersistentAttempt(profileId, challenge);
+  return res.status(202).json({ recorded: true, persisted: true, status: "attempt_recorded", attemptedAt: attempt.attemptedAt, verificationStartsAfter: challenge.deadlineAt, scoring: { onTimePoints: 100, latePoints: 70, deadlineAt: challenge.deadlineAt } });
 });
-router.get("/progress", (_req, res) => {
-  const profile = demoProfile(); const mine = [...completions.values()].filter((item) => item.profileId === profile.id); const verified = mine.filter((item) => item.status === "verified");
-  res.json({ profile, verifiedCompletions: verified.length, completionPercentage: Math.round((verified.length / 30) * 100), statuses: mine });
+
+router.post("/verification/request", async (req, res) => {
+  const parsed = z.object({ challengeId: z.string() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "challengeId is required" });
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  await enqueuePersistentVerification(profileId, parsed.data.challengeId);
+  return res.status(202).json({ queued: true, persisted: true });
 });
-router.get("/leaderboard", (req, res) => {
-  const query = String(req.query.search ?? "").toLowerCase();
-  const rows = [...profiles.values()].filter((profile) => `${profile.name} ${profile.handle}`.toLowerCase().includes(query)).sort((a, b) => b.points - a.points || b.streak - a.streak || a.name.localeCompare(b.name)).map((profile, index) => ({ rank: index + 1, name: profile.name, handle: profile.handle, academicYear: profile.academicYear, points: profile.points, streak: profile.streak, solved: profile.streak }));
-  res.json({ currentDay: 7, totalParticipants: profiles.size, verifiedCompletions: [...completions.values()].filter((item) => item.status === "verified").length, updatedAt: new Date().toISOString(), rows });
+
+router.post("/cron/verify", async (req, res) => {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || req.header("x-cron-secret") !== expected) return res.status(401).json({ error: "unauthorized" });
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  return res.status(202).json({ accepted: true, ...(await runPersistentVerificationCycle()) });
 });
-router.get("/jobs/metrics", (_req, res) => {
-  const all = [...jobs.values()];
-  res.json({
-    queued: all.filter((job) => job.status === "queued").length,
-    processing: all.filter((job) => job.status === "processing").length,
-    retrying: all.filter((job) => job.status === "retry").length,
-    terminalFailures: all.filter((job) => job.status === "failed").length,
-    paused: verificationIsPaused(),
-    pausedUntil: verificationIsPaused() ? new Date(verificationPausedUntil).toISOString() : null,
-    recentAlerts: adminAlerts.slice(0, 10),
-  });
+
+router.get("/progress", async (req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  return res.json(await getPersistentProgress(profileId));
+});
+router.get("/profile", async (req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  return res.json({ profile: await getPersistentProfile(profileId) });
+});
+router.patch("/profile", async (req, res) => {
+  const parsed = z.object({ name: z.string().min(1).max(120).optional(), leetcode_username: z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/).optional(), academic_year: z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_profile" });
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  return res.json({ profile: await updatePersistentProfile(profileId, parsed.data) });
+});
+
+router.get("/leaderboard", async (req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const rows = (await getPersistentLeaderboard(String(req.query.search ?? "").toLowerCase())) ?? [];
+  return res.json({ currentDay: rows.length ? 0 : null, totalParticipants: rows.length, verifiedCompletions: 0, updatedAt: new Date().toISOString(), rows });
+});
+
+router.get("/jobs/metrics", async (_req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  return res.json({ ...(await getPersistentJobMetrics()), paused: false, pausedUntil: null, recentAlerts: [] });
 });
 
 export default router;

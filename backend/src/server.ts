@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import api from "./routes.js";
+import { runPersistentVerificationCycle } from "./persistent-worker.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -18,6 +19,9 @@ app.use("/api", api);
 app.get("/health", (_request, response) => {
   response.json({ status: "ok", service: "30days-backend" });
 });
+
+const verificationTimer = setInterval(() => { void runPersistentVerificationCycle(); }, 60_000);
+verificationTimer.unref();
 
 app.listen(port, host, () => {
   console.log(`30DAYS backend listening on http://${host}:${port}`);

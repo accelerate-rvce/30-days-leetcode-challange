@@ -1,12 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verificationPausedUntil = exports.adminAlerts = exports.jobs = exports.completions = exports.challenges = exports.profiles = void 0;
+exports.verificationPausedUntil = exports.adminAlerts = exports.jobs = exports.completions = exports.challenges = exports.profiles = exports.LATE_POINTS = exports.ON_TIME_POINTS = void 0;
+exports.pointsForCompletion = pointsForCompletion;
 exports.completionKey = completionKey;
 exports.findOrCreateCompletion = findOrCreateCompletion;
 exports.enqueueVerification = enqueueVerification;
 exports.pauseVerification = pauseVerification;
 exports.verificationIsPaused = verificationIsPaused;
 const istOffsetMs = 5.5 * 60 * 60 * 1000;
+exports.ON_TIME_POINTS = 100;
+exports.LATE_POINTS = 70;
+function pointsForCompletion(timestamp, deadlineAt) {
+    return Date.parse(timestamp) <= Date.parse(deadlineAt) ? exports.ON_TIME_POINTS : exports.LATE_POINTS;
+}
 function activeWindow() {
     const localNow = new Date(Date.now() + istOffsetMs);
     let deadlineUtc = Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate(), 18, 0, 0) - istOffsetMs;
@@ -14,12 +20,8 @@ function activeWindow() {
         deadlineUtc += 24 * 60 * 60 * 1000;
     return { publishedAt: new Date(deadlineUtc - 24 * 60 * 60 * 1000).toISOString(), deadlineAt: new Date(deadlineUtc).toISOString() };
 }
-exports.profiles = new Map([
-    ["demo-user", { id: "demo-user", name: "Arjun Sharma", handle: "arjun.builds", academicYear: "Third Year", points: 210, streak: 7, longestStreak: 7 }],
-    ["nisha", { id: "nisha", name: "Nisha Kapoor", handle: "nisha.codes", academicYear: "Third Year", points: 262, streak: 7, longestStreak: 7 }],
-    ["devansh", { id: "devansh", name: "Devansh Mehta", handle: "devansh_m", academicYear: "Second Year", points: 248, streak: 7, longestStreak: 7 }],
-]);
-exports.challenges = new Map([["challenge-07", { id: "challenge-07", day: 7, title: "Two Sum", slug: "two-sum", difficulty: "Easy", topic: "Array · Hash Table", points: 20, ...activeWindow() }]]);
+exports.profiles = new Map();
+exports.challenges = new Map();
 exports.completions = new Map();
 exports.jobs = new Map();
 exports.adminAlerts = [];

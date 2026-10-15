@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const routes_js_1 = __importDefault(require("./routes.js"));
+const persistent_worker_js_1 = require("./persistent-worker.js");
 const app = (0, express_1.default)();
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -19,6 +20,8 @@ app.use("/api", routes_js_1.default);
 app.get("/health", (_request, response) => {
     response.json({ status: "ok", service: "30days-backend" });
 });
+const verificationTimer = setInterval(() => { void (0, persistent_worker_js_1.runPersistentVerificationCycle)(); }, 60_000);
+verificationTimer.unref();
 app.listen(port, host, () => {
     console.log(`30DAYS backend listening on http://${host}:${port}`);
 });

@@ -34,7 +34,9 @@ npm run dev:worker          # scheduler and verification worker
 
 The backend exposes `GET /health`, `GET /api/challenges/current`, `POST /api/events/open`, `GET /api/progress`, and `GET /api/leaderboard`.
 
-Opening a challenge records one idempotent attempt; it does not call LeetCode. The separate worker waits until the challenge deadline (6:00 PM IST for a standard daily schedule), queues only those recorded attempts, and verifies them one at a time. External verification failures create an admin alert, pause the worker for 20 minutes, and resume automatically from the queue. The local development store is in-memory; configure Supabase and move these queue operations to the supplied PostgreSQL tables before relying on restart-safe persistence in production.
+Opening a challenge records one idempotent attempt in Supabase; it does not call LeetCode. After each challenge deadline, the verifier discovers pending completions, claims jobs with database row locks, groups them by user, and fetches each user’s recent accepted submissions once. Verification retries are persisted, and point awards are transactionally guarded so a repeated submission or retry cannot award duplicate points.
+
+Production setup requires applying `backend/database/migrations/001_initial.sql` and `002_verification_pipeline.sql`, then configuring the Supabase service-role key and `CRON_SECRET` on Render. The GitHub Actions workflow at `.github/workflows/verification-cron.yml` calls `/api/cron/verify` every ten minutes; set repository secrets `RENDER_BACKEND_URL` and `CRON_SECRET` to wake the free Render web service and process verification batches.
 
 ## Production boundaries
 

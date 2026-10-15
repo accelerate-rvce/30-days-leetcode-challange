@@ -19,7 +19,7 @@ create table if not exists challenges (
 create table if not exists completions (
   id uuid primary key default gen_random_uuid(), profile_id uuid not null references profiles(id) on delete cascade,
   challenge_id uuid not null references challenges(id) on delete cascade, status text not null default 'pending' check (status in ('pending','verified','not_verified','delayed','error')),
-  attempted_at timestamptz not null default now(), verified_at timestamptz, submission_at timestamptz, evidence jsonb, created_at timestamptz not null default now(),
+  attempted_at timestamptz not null default now(), verified_at timestamptz, submission_at timestamptz, awarded_points integer check (awarded_points in (70, 100)), evidence jsonb, created_at timestamptz not null default now(),
   unique(profile_id, challenge_id)
 );
 
