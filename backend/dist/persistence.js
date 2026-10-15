@@ -44,7 +44,7 @@ async function getPersistentProfile(profileId) {
 async function updatePersistentProfile(profileId, updates) {
     if (!exports.db)
         return null;
-    const { data, error } = await exports.db.from("profiles").update(updates).eq("id", profileId).select("id,name,leetcode_username,academic_year,points,streak,longest_streak").single();
+    const { data, error } = await exports.db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak").single();
     if (error)
         throw error;
     return data;

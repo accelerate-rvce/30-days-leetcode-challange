@@ -68,7 +68,7 @@ router.get("/profile", async (req, res) => {
     return res.json({ profile: await (0, persistence_js_1.getPersistentProfile)(profileId) });
 });
 router.patch("/profile", async (req, res) => {
-    const parsed = zod_1.z.object({ name: zod_1.z.string().min(1).max(120).optional(), leetcode_username: zod_1.z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/).optional(), academic_year: zod_1.z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
+    const parsed = zod_1.z.object({ name: zod_1.z.string().trim().min(1).max(120).optional(), leetcode_username: zod_1.z.string().trim().min(1).max(80).transform((value) => value.replace(/^@+/, "")).pipe(zod_1.z.string().regex(/^[A-Za-z0-9_-]+$/)).optional(), academic_year: zod_1.z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: "invalid_profile" });
     if (!persistence_js_1.persistenceEnabled)

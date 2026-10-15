@@ -126,9 +126,11 @@ export default function Home() {
     if (!token || savingProfile) return;
     setSavingProfile(true); setError("");
     try {
-      const response = await fetch(`${api}/api/profile`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: waitlistName.trim(), academic_year: academicYear, leetcode_username: leetcodeHandle.trim() }) });
-      if (!response.ok) throw new Error("profile_update_failed");
-      setProgress((current) => current ? { ...current, profile: { ...current.profile, name: waitlistName.trim(), academic_year: academicYear, leetcode_username: leetcodeHandle.trim() } } : current);
+      const normalizedHandle = leetcodeHandle.trim().replace(/^@+/, "");
+      const response = await fetch(`${api}/api/profile`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: waitlistName.trim(), academic_year: academicYear, leetcode_username: normalizedHandle }) });
+      if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; throw new Error(body.error ?? "profile_update_failed"); }
+      setLeetcodeHandle(normalizedHandle);
+      setProgress((current) => current ? { ...current, profile: { ...current.profile, name: waitlistName.trim(), academic_year: academicYear, leetcode_username: normalizedHandle } } : current);
       setOnboardingStage("ready");
     } catch { setError("We couldn’t save your LeetCode username. Please check it and try again."); }
     finally { setSavingProfile(false); }

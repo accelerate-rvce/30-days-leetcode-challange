@@ -36,7 +36,7 @@ export async function getPersistentProfile(profileId: string) {
 
 export async function updatePersistentProfile(profileId: string, updates: { name?: string; leetcode_username?: string; academic_year?: string }) {
   if (!db) return null;
-  const { data, error } = await db.from("profiles").update(updates).eq("id", profileId).select("id,name,leetcode_username,academic_year,points,streak,longest_streak").single();
+  const { data, error } = await db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak").single();
   if (error) throw error;
   return data;
 }

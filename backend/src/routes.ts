@@ -57,7 +57,7 @@ router.get("/profile", async (req, res) => {
   return res.json({ profile: await getPersistentProfile(profileId) });
 });
 router.patch("/profile", async (req, res) => {
-  const parsed = z.object({ name: z.string().min(1).max(120).optional(), leetcode_username: z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/).optional(), academic_year: z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
+  const parsed = z.object({ name: z.string().trim().min(1).max(120).optional(), leetcode_username: z.string().trim().min(1).max(80).transform((value) => value.replace(/^@+/, "")).pipe(z.string().regex(/^[A-Za-z0-9_-]+$/)).optional(), academic_year: z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_profile" });
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
