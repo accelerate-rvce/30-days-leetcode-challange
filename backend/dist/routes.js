@@ -6,6 +6,19 @@ const persistence_js_1 = require("./persistence.js");
 const persistent_worker_js_1 = require("./persistent-worker.js");
 const router = (0, express_1.Router)();
 const authToken = (value) => value?.replace(/^Bearer\s+/i, "");
+function normalizeLeetCodeUsername(value) {
+    const input = value.trim().replace(/[\])}>]+$/, "");
+    try {
+        const parsed = new URL(input);
+        if (parsed.hostname === "leetcode.com" || parsed.hostname === "www.leetcode.com") {
+            const match = parsed.pathname.match(/^\/u\/([^/]+)\/?$/i);
+            if (match)
+                return decodeURIComponent(match[1]);
+        }
+    }
+    catch { /* raw username */ }
+    return input.replace(/^@+/, "");
+}
 router.get("/challenges/current", async (_req, res) => {
     if (!persistence_js_1.persistenceEnabled)
         return res.status(503).json({ error: "persistence_not_configured" });
@@ -68,15 +81,18 @@ router.get("/profile", async (req, res) => {
     return res.json({ profile: await (0, persistence_js_1.getPersistentProfile)(profileId) });
 });
 router.patch("/profile", async (req, res) => {
-    const parsed = zod_1.z.object({ name: zod_1.z.string().trim().min(1).max(120).optional(), leetcode_username: zod_1.z.string().trim().min(1).max(80).transform((value) => value.replace(/^@+/, "")).pipe(zod_1.z.string().regex(/^[A-Za-z0-9_-]+$/)).optional(), academic_year: zod_1.z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
+    const parsed = zod_1.z.object({ name: zod_1.z.string().trim().min(1).max(120).optional(), leetcode_username: zod_1.z.string().trim().min(1).max(300).optional(), academic_year: zod_1.z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: "invalid_profile" });
+    const updates = { ...parsed.data, ...(parsed.data.leetcode_username ? { leetcode_username: normalizeLeetCodeUsername(parsed.data.leetcode_username) } : {}) };
+    if (updates.leetcode_username && !/^[A-Za-z0-9_-]+$/.test(updates.leetcode_username))
+        return res.status(400).json({ error: "invalid_leetcode_username" });
     if (!persistence_js_1.persistenceEnabled)
         return res.status(503).json({ error: "persistence_not_configured" });
     const profileId = await (0, persistence_js_1.userIdFromAccessToken)(authToken(req.header("authorization")));
     if (!profileId)
         return res.status(401).json({ error: "authentication_required" });
-    return res.json({ profile: await (0, persistence_js_1.updatePersistentProfile)(profileId, parsed.data) });
+    return res.json({ profile: await (0, persistence_js_1.updatePersistentProfile)(profileId, updates) });
 });
 router.get("/leaderboard", async (req, res) => {
     if (!persistence_js_1.persistenceEnabled)
