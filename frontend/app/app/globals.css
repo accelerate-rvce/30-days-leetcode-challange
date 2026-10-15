@@ -51,6 +51,8 @@ button { cursor: pointer; }
 
 .support-email { color: inherit; text-decoration: none; }
 .support-email:hover { border-color: rgba(198,255,77,.38); }
+.support-contact-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, 1fr); margin-top: 10px; }
+@media (max-width: 680px) { .support-contact-grid { grid-template-columns: 1fr; } }
 .admin-page .leaderboard-metrics { grid-template-columns: repeat(4, 1fr); }
 .admin-status-row { border-top: 1px solid var(--line); color: var(--muted); display: flex; font-family: var(--font-geist-mono); font-size: 10px; gap: 20px; justify-content: space-between; margin-top: 22px; padding-top: 13px; }
 .admin-status-row span { align-items: center; display: flex; gap: 8px; }

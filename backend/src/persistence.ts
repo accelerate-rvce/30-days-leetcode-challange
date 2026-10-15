@@ -104,9 +104,15 @@ export async function getPersistentLeaderboard(query: string) {
   let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").order("points", { ascending: false }).order("streak", { ascending: false });
   const safeQuery = query.replace(/[,%()]/g, "");
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
-  const { data, error } = await request;
+  const [{ data, error }, { data: verifiedCompletions, error: completionError }] = await Promise.all([
+    request,
+    db.from("completions").select("profile_id").eq("status", "verified"),
+  ]);
   if (error) throw error;
-  return (data ?? []).map((profile, index) => ({ rank: index + 1, name: profile.name, handle: profile.leetcode_username ?? "", academicYear: profile.academic_year, points: profile.points, streak: profile.streak ?? 0, solved: profile.streak ?? 0 }));
+  if (completionError) throw completionError;
+  const solvedByProfile = new Map<string, number>();
+  for (const completion of verifiedCompletions ?? []) solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
+  return (data ?? []).map((profile, index) => ({ rank: index + 1, name: profile.name, handle: profile.leetcode_username ?? "", academicYear: profile.academic_year, points: profile.points, streak: profile.streak ?? 0, solved: solvedByProfile.get(profile.id) ?? 0 }));
 }
 
 export async function getPersistentJobMetrics() {
