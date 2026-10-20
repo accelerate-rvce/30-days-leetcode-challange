@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, getAdminAuditLogs, getAdminChallenges, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, getAdminAuditLogs, getAdminChallenges, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -180,8 +180,10 @@ router.post("/admin/challenges", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "challenge_create_failed";
     await writeAdminAuditLog(adminId, { action: "create_challenge", status: "error", message, metadata: parsed.data });
-    const conflict = /duplicate|unique|already exists/i.test(message);
-    return res.status(conflict ? 409 : 400).json({ error: conflict ? "day_or_slug_taken" : "challenge_create_failed" });
+    const errorCode = message === "day_taken" || message === "slug_taken"
+      ? message
+      : /duplicate|unique|already exists/i.test(message) ? "day_or_slug_taken" : "challenge_create_failed";
+    return res.status(errorCode === "challenge_create_failed" ? 400 : 409).json({ error: errorCode });
   }
 });
 
@@ -285,9 +287,35 @@ router.patch("/admin/settings", async (req, res) => {
     patch.launchAt = parsed.data.launchAt ? new Date(parsed.data.launchAt).toISOString() : null;
   }
   try {
+    const before = await getSiteSettings();
     const settings = await updateSiteSettings(patch);
+    let launch = null;
+    if (before.waitlistEnabled && !settings.waitlistEnabled) {
+      try {
+        launch = await launchFirstChallenge();
+        await writeAdminAuditLog(adminId, {
+          action: "launch_day_one",
+          status: launch.started ? "success" : "info",
+          message: launch.started
+            ? `Waitlist disabled; Day ${launch.day} started at ${launch.publishedAt}`
+            : `Waitlist disabled; launch skipped (${launch.reason ?? "already_started"})`,
+          targetChallengeId: launch.challengeId,
+          metadata: launch,
+        });
+      } catch (error) {
+        // Do not leave the cohort live with a stale pre-launch challenge
+        // window. Re-enable the waitlist and let the admin retry.
+        await updateSiteSettings({ waitlistEnabled: true }).catch(() => {});
+        await writeAdminAuditLog(adminId, { action: "launch_day_one", status: "error", message: error instanceof Error ? error.message : "launch_start_failed" }).catch(() => {});
+        return res.status(500).json({ error: "launch_start_failed" });
+      }
+    }
+    if (launch?.started && launch.publishedAt) {
+      settings.launchAt = launch.publishedAt;
+      settings.sprintStartedAt = launch.publishedAt;
+    }
     await writeAdminAuditLog(adminId, { action: "update_settings", status: "success", message: `Waitlist ${settings.waitlistEnabled ? "enabled" : "disabled"}`, metadata: patch as Record<string, unknown> });
-    return res.json(settings);
+    return res.json({ ...settings, launch });
   } catch (error) {
     await writeAdminAuditLog(adminId, { action: "update_settings", status: "error", message: error instanceof Error ? error.message : "settings_update_failed" });
     return res.status(400).json({ error: "settings_update_failed_apply_migration_005" });
