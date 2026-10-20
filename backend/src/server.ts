@@ -9,7 +9,7 @@ const host = process.env.HOST ?? "0.0.0.0";
 
 const allowedOrigins = (process.env.FRONTEND_ORIGIN ?? "http://localhost:3000")
   .split(",")
-  .map((origin) => origin.trim())
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
   .filter(Boolean);
 
 app.use(express.json());
