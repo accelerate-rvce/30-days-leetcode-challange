@@ -70,11 +70,24 @@ export async function recordPersistentAttempt(profileId: string, challenge: Chal
   return { attemptedAt: data?.attempted_at ?? new Date().toISOString(), deadlineAt: challenge.deadlineAt };
 }
 
+function mapChallenge(data: { id: string; day: number; title: string; slug: string; difficulty: string; topic: string; points: number; published_at: string; deadline_at: string; verification_queued_at: string | null }) {
+  return { id: data.id, day: data.day, title: data.title, slug: data.slug, difficulty: data.difficulty, topic: data.topic, points: data.points, publishedAt: data.published_at, deadlineAt: data.deadline_at, verificationQueuedAt: data.verification_queued_at };
+}
+
 export async function getPersistentCurrentChallenge() {
   if (!db) return null;
-  const { data, error } = await db.from("challenges").select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").lte("published_at", new Date().toISOString()).order("day", { ascending: false }).limit(1).maybeSingle();
-  if (error) throw error;
-  return data ? { id: data.id, day: data.day, title: data.title, slug: data.slug, difficulty: data.difficulty, topic: data.topic, points: data.points, publishedAt: data.published_at, deadlineAt: data.deadline_at, verificationQueuedAt: data.verification_queued_at } : null;
+  const now = new Date().toISOString();
+  // Prefer the lowest-numbered day that is currently inside its window. This
+  // keeps Day 1 active even if a later question was pre-published, and moves
+  // to the next day only after the current deadline has passed.
+  const { data: active, error: activeError } = await db.from("challenges").select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").lte("published_at", now).gt("deadline_at", now).order("day", { ascending: true }).limit(1).maybeSingle();
+  if (activeError) throw activeError;
+  if (active) return mapChallenge(active);
+  // Late mode: if every published window has closed, expose the most recent
+  // published day so students can still complete a missed challenge.
+  const { data: latest, error: latestError } = await db.from("challenges").select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").lte("published_at", now).order("day", { ascending: false }).limit(1).maybeSingle();
+  if (latestError) throw latestError;
+  return latest ? mapChallenge(latest) : null;
 }
 
 export async function getPersistentChallenge(challengeId: string) {
@@ -192,25 +205,40 @@ export async function writeAdminAuditLog(adminProfileId: string, entry: { action
 
 export async function createAdminChallenge(input: { day: number; title: string; slug: string; difficulty: string; topic: string; points: number; published_at: string; deadline_at: string }) {
   if (!db) return null;
+  // The database enforces one challenge per day. Check both constraints up
+  // front so the admin UI can explain exactly what needs to change instead of
+  // surfacing a generic Postgres duplicate-key error.
+  const [{ data: dayTaken, error: dayError }, { data: slugTaken, error: slugError }] = await Promise.all([
+    db.from("challenges").select("id").eq("day", input.day).maybeSingle(),
+    db.from("challenges").select("id").eq("slug", input.slug).maybeSingle(),
+  ]);
+  if (dayError) throw dayError;
+  if (slugError) throw slugError;
+  if (dayTaken) throw new Error("day_taken");
+  if (slugTaken) throw new Error("slug_taken");
   const { data, error } = await db.from("challenges").insert(input).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
   if (error) throw error;
   return data;
 }
 
-export type SiteSettings = { waitlistEnabled: boolean; message: string; launchAt: string | null };
+export type SiteSettings = { waitlistEnabled: boolean; message: string; launchAt: string | null; sprintStartedAt: string | null };
+
+export type LaunchResult = { started: boolean; reason?: string; challengeId?: string; day?: number; publishedAt?: string; deadlineAt?: string; updatedCompletions?: number; updatedProfiles?: number };
 
 export async function getSiteSettings(): Promise<SiteSettings> {
-  const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null };
+  const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null, sprintStartedAt: null };
   if (!db) return defaults;
   const { data, error } = await db.from("site_settings").select("key,value");
   if (error) throw error;
   const map = new Map((data ?? []).map((row) => [row.key as string, row.value]));
   const message = map.get("waitlist_message");
   const launchAt = map.get("launch_at");
+  const sprintStartedAt = map.get("sprint_started_at");
   return {
     waitlistEnabled: map.get("waitlist_enabled") === true,
     message: typeof message === "string" ? message : "",
     launchAt: typeof launchAt === "string" ? launchAt : null,
+    sprintStartedAt: typeof sprintStartedAt === "string" ? sprintStartedAt : null,
   };
 }
 
@@ -225,6 +253,61 @@ export async function updateSiteSettings(patch: { waitlistEnabled?: boolean; mes
     if (error) throw error;
   }
   return getSiteSettings();
+}
+
+export async function launchFirstChallenge(): Promise<LaunchResult> {
+  if (!db) throw new Error("persistence_not_configured");
+  const settings = await getSiteSettings();
+  if (settings.sprintStartedAt) return { started: false, reason: "sprint_already_started" };
+
+  const { data: challenge, error: challengeError } = await db.from("challenges").select("id,day").order("day", { ascending: true }).limit(1).maybeSingle();
+  if (challengeError) throw challengeError;
+  if (!challenge) return { started: false, reason: "no_challenge" };
+
+  const startedAt = new Date();
+  const publishedAt = startedAt.toISOString();
+  const deadlineAt = new Date(startedAt.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: completions, error: completionError } = await db.from("completions").select("id,profile_id,status,submission_at,awarded_points").eq("challenge_id", challenge.id);
+  if (completionError) throw completionError;
+  const profileIds = [...new Set((completions ?? []).map((completion) => completion.profile_id as string))];
+
+  const { error: challengeUpdateError } = await db.from("challenges").update({ published_at: publishedAt, deadline_at: deadlineAt }).eq("id", challenge.id);
+  if (challengeUpdateError) throw challengeUpdateError;
+
+  // Re-score anything that was verified while the waitlist was still on. A
+  // Day 1 submission made during that preview is on time once the actual
+  // launch clock starts, rather than being treated as a late submission
+  // against the old scheduled deadline.
+  let updatedCompletions = 0;
+  for (const completion of completions ?? []) {
+    if (completion.status !== "verified" || !completion.submission_at) continue;
+    const nextPoints = pointsForCompletion(completion.submission_at, deadlineAt);
+    if (completion.awarded_points === nextPoints) continue;
+    const { error } = await db.from("completions").update({ awarded_points: nextPoints }).eq("id", completion.id);
+    if (error) throw error;
+    updatedCompletions += 1;
+  }
+
+  // Rebuild each affected profile's score from its verified completions so
+  // the 70 -> 100 correction is reflected immediately and remains idempotent.
+  for (const profileId of profileIds) {
+    const { data: verified, error: verifiedError } = await db.from("completions").select("awarded_points").eq("profile_id", profileId).eq("status", "verified");
+    if (verifiedError) throw verifiedError;
+    const points = (verified ?? []).reduce((total, completion) => total + (completion.awarded_points ?? 0), 0);
+    const { error: profileError } = await db.from("profiles").update({ points }).eq("id", profileId);
+    if (profileError) throw profileError;
+  }
+
+  // Record the actual launch time. Checking this marker makes repeated
+  // waitlist toggles safe: they never silently extend Day 1 again.
+  const { error: markerError } = await db.from("site_settings").upsert([
+    { key: "sprint_started_at", value: publishedAt, updated_at: publishedAt },
+    { key: "launch_at", value: publishedAt, updated_at: publishedAt },
+  ], { onConflict: "key" });
+  if (markerError) throw markerError;
+
+  return { started: true, challengeId: challenge.id, day: challenge.day, publishedAt, deadlineAt, updatedCompletions, updatedProfiles: profileIds.length };
 }
 
 export async function updateAdminChallenge(challengeId: string, updates: { title?: string; slug?: string; difficulty?: string; topic?: string; points?: number; published_at?: string; deadline_at?: string }) {
