@@ -32,14 +32,16 @@ const resources = [
 ] as const;
 
 const supportEmails = [process.env.NEXT_PUBLIC_SUPPORT_EMAIL_ONE, process.env.NEXT_PUBLIC_SUPPORT_EMAIL_TWO].filter((email): email is string => Boolean(email));
+const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
 
 function viewFor(pathname: string): View {
-  if (pathname === "/challenge") return "challenge";
-  if (pathname === "/progress") return "progress";
-  if (pathname === "/leaderboard") return "leaderboard";
-  if (pathname === "/resources") return "resources";
-  if (pathname === "/support") return "support";
-  if (pathname === "/admin") return "admin";
+  const route = pathname === "/" ? pathname : pathname.replace(/\/+$/, "");
+  if (route === "/challenge") return "challenge";
+  if (route === "/progress") return "progress";
+  if (route === "/leaderboard") return "leaderboard";
+  if (route === "/resources") return "resources";
+  if (route === "/support") return "support";
+  if (route === "/admin") return "admin";
   return "overview";
 }
 
@@ -298,13 +300,13 @@ export default function Home() {
   }, [api, authLoading, token, siteSettings?.waitlistEnabled]);
 
   useEffect(() => {
-    if (session && progress && pathname === "/admin" && progress.profile.role !== "admin") router.replace("/");
-  }, [pathname, progress, router, session]);
+    if (session && progress && view === "admin" && progress.profile.role !== "admin") router.replace("/");
+  }, [view, progress, router, session]);
 
   async function signIn() {
     if (!supabase) { setError("Authentication is not configured."); return; }
     setOnboardingStage("signin");
-    const { error: signInError } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/`, queryParams: { hd: "rvce.edu.in", prompt: "select_account" } } });
+    const { error: signInError } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}${basePath}/`, queryParams: { hd: "rvce.edu.in", prompt: "select_account" } } });
     if (signInError) setError("Couldn’t start sign-in. Try again.");
   }
 
