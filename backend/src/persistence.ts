@@ -25,8 +25,12 @@ export async function userIdFromAccessToken(token?: string) {
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) return null;
   const user = data.user;
+  const email = user.email?.toLowerCase();
+  const isConfiguredAdmin = Boolean(email && configuredAdminEmails.has(email));
+  // The browser check is UX; enforce the college domain at the API boundary
+  // too so a token from another Google account cannot read or write data.
+  if (!isConfiguredAdmin && !email?.endsWith("@rvce.edu.in")) return null;
   const { data: existingProfile } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  const isConfiguredAdmin = Boolean(user.email && configuredAdminEmails.has(user.email.toLowerCase()));
   if (isConfiguredAdmin && existingProfile && existingProfile.role !== "admin") await db.from("profiles").update({ role: "admin" }).eq("id", user.id);
   await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "First Year", ...(isConfiguredAdmin ? { role: "admin" } : {}) }, { onConflict: "id", ignoreDuplicates: true });
   return user.id;
@@ -276,12 +280,22 @@ export async function claimPersistentJobs(limit = 50) {
   return (data ?? []) as ClaimedJob[];
 }
 
-export async function markPersistentRetry(job: ClaimedJob, errorMessage: string, maxRetries: number) {
+function withJitter(delayMs: number) {
+  // Long delays (daily-budget reset or a long Retry-After) should never be
+  // shortened by jitter, or a job can wake before the budget actually resets.
+  if (delayMs > 60 * 60_000) return delayMs + Math.round(Math.random() * 15 * 60_000);
+  return Math.round(delayMs * (0.85 + Math.random() * 0.3));
+}
+
+export async function markPersistentRetry(job: ClaimedJob, errorMessage: string, maxRetries: number, delayMs = 20 * 60_000, countsAsAttempt = true) {
   if (!db) return;
-  const terminal = job.attempts >= maxRetries;
+  const terminal = countsAsAttempt && job.attempts >= maxRetries;
   await db.from("verification_jobs").update({
     status: terminal ? "failed" : "retry",
-    available_at: new Date(Date.now() + (terminal ? 0 : 20 * 60_000)).toISOString(),
+    // Infrastructure failures (429/cooldown/network) should not consume the
+    // small not-found retry budget. The claim increased attempts; undo it.
+    attempts: countsAsAttempt ? job.attempts : Math.max(0, job.attempts - 1),
+    available_at: new Date(Date.now() + (terminal ? 0 : withJitter(delayMs))).toISOString(),
     last_error: errorMessage,
     locked_at: null,
   }).eq("id", job.id);
@@ -292,7 +306,7 @@ export async function markPersistentNotFound(job: ClaimedJob, maxRetries: number
   const terminal = job.attempts >= maxRetries;
   await db.from("verification_jobs").update({
     status: terminal ? "failed" : "retry",
-    available_at: new Date(Date.now() + (terminal ? 0 : 15 * 60_000)).toISOString(),
+    available_at: new Date(Date.now() + (terminal ? 0 : withJitter(15 * 60_000))).toISOString(),
     last_error: "no_matching_accepted_submission",
     locked_at: null,
   }).eq("id", job.id);

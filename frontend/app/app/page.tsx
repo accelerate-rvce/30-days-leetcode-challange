@@ -7,7 +7,7 @@ import { supabase } from "../lib/supabase";
 import ParticleText from "../components/ParticleText";
 
 type View = "overview" | "challenge" | "progress" | "leaderboard" | "resources" | "support" | "admin";
-type OnboardingStage = "loading" | "welcome" | "briefing" | "signin" | "waitlist" | "ready";
+type OnboardingStage = "welcome" | "briefing" | "signin" | "waitlist" | "ready";
 type Challenge = { id: string; day: number; title: string; slug: string; difficulty: string; topic: string; points: number; publishedAt: string; deadlineAt: string };
 type Progress = { profile: { name: string; points: number; streak?: number; leetcode_username?: string; academic_year?: string; academicYear?: string; role?: "student" | "admin" }; verifiedCompletions: number; completionPercentage: number; statuses: { challenge_id: string; status: string; awarded_points?: number }[] };
 type LeaderboardRow = { rank: number; name: string; handle: string; academicYear: string; points: number; streak: number; solved: number };
@@ -44,12 +44,22 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(value));
 }
 
+async function fetchSiteSettings(api: string, signal?: AbortSignal): Promise<SiteSettings> {
+  const response = await fetch(`${api}/api/settings`, { signal, cache: "no-store" });
+  if (!response.ok) throw new Error(`settings_${response.status}`);
+  const body = await response.json() as Partial<SiteSettings>;
+  if (typeof body.waitlistEnabled !== "boolean" || typeof body.message !== "string" || (body.launchAt !== null && typeof body.launchAt !== "string")) {
+    throw new Error("invalid_settings");
+  }
+  return { waitlistEnabled: body.waitlistEnabled, message: body.message, launchAt: body.launchAt ?? null };
+}
+
 export default function Home() {
   const router = useRouter();
   const pathname = usePathname();
   const view = viewFor(pathname);
   const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const [introComplete, setIntroComplete] = useState(false);
   const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>("welcome");
   const [loading, setLoading] = useState(true);
@@ -76,6 +86,9 @@ export default function Home() {
   const [adminJobs, setAdminJobs] = useState<AdminJob[]>([]);
   const [adminLogs, setAdminLogs] = useState<AdminLog[]>([]);
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsRetry, setSettingsRetry] = useState(0);
   const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   const token = session?.access_token;
 
@@ -85,29 +98,83 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!supabase) { setAuthLoading(false); return; }
+    if (!supabase) return;
     const client = supabase;
-    void client.auth.getSession().then(async ({ data }) => { const email = data.session?.user.email?.toLowerCase(); if (email && !email.endsWith("@rvce.edu.in")) { await client.auth.signOut(); setError("Use your @rvce.edu.in Google account."); setSession(null); } else setSession(data.session); setAuthLoading(false); });
-    const { data: listener } = client.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => listener.subscription.unsubscribe();
+    let disposed = false;
+    let rejecting = false;
+
+    const rejectNonCollegeAccount = () => {
+      if (rejecting) return;
+      rejecting = true;
+      setError("Use your @rvce.edu.in Google account.");
+      setSession(null);
+      // Defer signOut outside the auth callback. Supabase warns that calling
+      // auth methods while its callback is running can deadlock the client.
+      window.setTimeout(() => {
+        void client.auth.signOut().finally(() => { rejecting = false; });
+      }, 0);
+    };
+
+    const acceptSession = (next: Session | null) => {
+      if (disposed) return;
+      const email = next?.user.email?.toLowerCase();
+      if (email && !email.endsWith("@rvce.edu.in")) {
+        rejectNonCollegeAccount();
+        return;
+      }
+      setSession(next);
+    };
+
+    void client.auth.getSession()
+      .then(({ data }) => acceptSession(data.session))
+      .catch(() => { /* surfaced by the normal connection error state */ })
+      .finally(() => { if (!disposed) setAuthLoading(false); });
+
+    const { data: listener } = client.auth.onAuthStateChange((event, next) => {
+      if (disposed) return;
+      if (event === "SIGNED_OUT") { setSession(null); return; }
+      acceptSession(next);
+    });
+    return () => { disposed = true; listener.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
-    void fetch(`${api}/api/settings`).then(async (response) => { if (response.ok) setSiteSettings(await response.json() as SiteSettings); }).catch(() => {});
-  }, [api]);
+    let active = true;
+    const loadSettings = async () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+      try {
+        const next = await fetchSiteSettings(api, controller.signal);
+        if (!active) return;
+        setSiteSettings(next);
+        setSettingsError("");
+      } catch {
+        // Keep the last known settings during a transient poll failure, but
+        // show a hard error if we have never confirmed the launch gate.
+        if (active) setSettingsError("We couldn’t confirm the launch status. Check your connection and try again.");
+      } finally {
+        window.clearTimeout(timeout);
+        if (active) setSettingsLoading(false);
+      }
+    };
+    void loadSettings();
+    // Keep the waitlist gate fresh so an open cohort unlocks without a reload.
+    const timer = window.setInterval(() => { void loadSettings(); }, 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [api, settingsRetry]);
 
   useEffect(() => {
-    if (authLoading || !token) { setLoading(false); return; }
+    if (authLoading || !token) return;
     const load = async () => {
       setLoading(true); setError("");
       try {
         const headers = { Authorization: `Bearer ${token}` };
-        const challengeResponse = await fetch(`${api}/api/challenges/current`);
+        const challengeResponse = await fetch(`${api}/api/challenges/current`, { headers });
         const launchGated = challengeResponse.status === 403;
         if (!challengeResponse.ok && !launchGated) throw new Error("challenge_unavailable");
         const challengeBody = launchGated ? { challenge: null } : await challengeResponse.json() as { challenge: Challenge | null };
         setChallenge(challengeBody.challenge);
-        const [progressResponse, leaderboardResponse, challengesResponse] = await Promise.all([fetch(`${api}/api/progress`, { headers }), fetch(`${api}/api/leaderboard`), fetch(`${api}/api/challenges`)]);
+        const [progressResponse, leaderboardResponse, challengesResponse] = await Promise.all([fetch(`${api}/api/progress`, { headers }), fetch(`${api}/api/leaderboard`, { headers }), fetch(`${api}/api/challenges`, { headers })]);
         if (progressResponse.ok) {
           const nextProgress = await progressResponse.json() as Progress;
           setProgress(nextProgress);
@@ -130,13 +197,11 @@ export default function Home() {
       finally { setLoading(false); }
     };
     void load();
-  }, [api, authLoading, token]);
+  }, [api, authLoading, token, siteSettings?.waitlistEnabled]);
 
   useEffect(() => {
-    if (introComplete && !session && !authLoading && onboardingStage === "loading") setOnboardingStage("welcome");
-    if (session && progress) setOnboardingStage(progress.profile.leetcode_username ? "ready" : "waitlist");
     if (session && progress && pathname === "/admin" && progress.profile.role !== "admin") router.replace("/");
-  }, [authLoading, introComplete, onboardingStage, pathname, progress, router, session]);
+  }, [pathname, progress, router, session]);
 
   async function signIn() {
     if (!supabase) { setError("Authentication is not configured."); return; }
@@ -149,7 +214,7 @@ export default function Home() {
     if (!supabase) return;
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) setError("Couldn’t sign you out. Please try again.");
-    else { setSession(null); setProgress(null); setChallenge(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("loading"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
+    else { setSession(null); setProgress(null); setChallenge(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("welcome"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
   }
 
   async function recordAndSolve() {
@@ -161,14 +226,27 @@ export default function Home() {
       window.open(leetcodeUrl, "_blank", "noopener,noreferrer");
       return;
     }
-    setRecording(true); setError("");
+    // Open the tab synchronously inside the click gesture so popup blockers
+    // allow it. We navigate it only after the attempt is safely recorded.
+    const leetcodeTab = window.open("about:blank", "_blank");
+    if (leetcodeTab) leetcodeTab.opener = null;
+    setRecording(true); setError(""); setVerifyMessage("");
     try {
       const response = await fetch(`${api}/api/events/open`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ challengeId: selectedChallenge.id }) });
       if (!response.ok) throw new Error("attempt_record_failed");
       setAttemptRecorded(true);
-      // Open in a new tab so the user keeps their session/progress here.
-      window.open(leetcodeUrl, "_blank", "noopener,noreferrer");
-    } catch { setError("We couldn’t record this attempt. Please try again."); }
+      if (leetcodeTab && !leetcodeTab.closed) {
+        try { leetcodeTab.location.replace(leetcodeUrl); }
+        catch { setVerifyMessage("Attempt recorded. Use “Open on LeetCode” to continue."); }
+      } else {
+        // Popup blocked: the attempt is recorded, so the now-visible
+        // “Open on LeetCode” button is a direct, user-triggered fallback.
+        setVerifyMessage("Attempt recorded. Use “Open on LeetCode” to continue.");
+      }
+    } catch {
+      if (leetcodeTab && !leetcodeTab.closed) leetcodeTab.close();
+      setError("We couldn’t record this attempt. Please try again.");
+    }
     finally { setRecording(false); }
   }
 
@@ -210,6 +288,20 @@ export default function Home() {
       setLeetcodeHandle(normalizedHandle);
       setProgress((current) => current ? { ...current, profile: { ...current.profile, name: waitlistName.trim(), academic_year: academicYear, leetcode_username: normalizedHandle } } : current);
       setOnboardingStage("ready");
+      // Registration is complete, but do not trust a possibly stale gate.
+      // Re-read the launch setting before rendering either the dashboard or
+      // the coming-soon confirmation. If the gate cannot be confirmed, fail
+      // closed instead of letting the student through.
+      try {
+        const latestSettings = await fetchSiteSettings(api);
+        setSiteSettings(latestSettings);
+        setSettingsError("");
+      } catch {
+        if (!siteSettings?.waitlistEnabled) {
+          setSiteSettings(null);
+          setSettingsError("Your registration was saved, but we couldn’t confirm the launch status. Check your connection and try again.");
+        }
+      }
     } catch { setError("We couldn’t save your LeetCode username. Please check it and try again."); }
     finally { setSavingProfile(false); }
   }
@@ -221,29 +313,32 @@ export default function Home() {
   if (!introComplete || authLoading) return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#f3f5ef" highlightColor="#c6ff4d" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE CLUB INITIATIVE</p></div></main>;
   // Waitlist mode: the public site is ONLY the waitlist screen + register.
   // No dashboard tour, no challenge content for non-admins.
-  if (siteSettings?.waitlistEnabled && !isAdmin && !session) return <LaunchWaitlist name="" message={siteSettings.message} launchAt={siteSettings.launchAt} onSignIn={signIn} />;
+  if (settingsLoading) return <LoadingScreen label="Checking cohort status…" />;
+  if (!siteSettings) return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">LAUNCH STATUS UNAVAILABLE</p><h1>We can’t confirm the launch gate.</h1><p className="onboarding-copy">{settingsError || "We couldn’t confirm the launch status. Check your connection and try again."} We’re not loading the dashboard until the backend confirms whether the waitlist is active.</p><div className="onboarding-actions"><button className="primary-button" onClick={() => { setSettingsError(""); setSettingsLoading(true); setSettingsRetry((value) => value + 1); }}>Retry <span>→</span></button>{session && <button className="secondary-button" onClick={signOut}>Log out</button>}</div></div></section></main>;
+  if (siteSettings?.waitlistEnabled && !isAdmin && !session) return <LaunchWaitlist message={siteSettings.message} launchAt={siteSettings.launchAt} onSignIn={signIn} error={error} />;
   if (!session) {
-    if (onboardingStage === "loading") return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#f3f5ef" highlightColor="#c6ff4d" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE CLUB INITIATIVE</p></div></main>;
-    if (onboardingStage === "welcome") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content welcome-content"><p className="onboarding-kicker">WELCOME, RVIANS</p><h1>Make a habit of solving.</h1><p className="onboarding-copy">Accelerate Club invites you to a focused 30-day LeetCode challenge for RVCE students.</p><button className="primary-button onboarding-action" onClick={() => setOnboardingStage("briefing")}>See how the challenge works <span>→</span></button></div></section></main>;
+    if (onboardingStage === "welcome") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content welcome-content"><p className="onboarding-kicker">WELCOME, RVIANS</p><h1>Make a habit of solving.</h1><p className="onboarding-copy">Accelerate Club invites you to a focused 30-day LeetCode challenge for RVCE students.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-action" onClick={() => setOnboardingStage("briefing")}>See how the challenge works <span>→</span></button></div></section></main>;
     if (onboardingStage === "briefing") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">THE FORMAT</p><h1>One question. Every day.</h1><div className="briefing-list"><div><b>01</b><p>A new challenge is published daily at 6:00 PM IST.</p></div><div><b>02</b><p>Solve on LeetCode and let the backend verify your accepted submission.</p></div><div><b>03</b><p>Earn 100 points on time or 70 points late, once per challenge.</p></div></div><div className="onboarding-actions"><button className="secondary-button" onClick={() => setOnboardingStage("welcome")}>Back</button><button className="primary-button" onClick={() => setOnboardingStage("signin")}>Continue <span>→</span></button></div></div></section></main>;
     return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">RVCE STUDENTS ONLY</p><h1>Use your college Google account.</h1><p className="onboarding-copy">Sign in with your <code>@rvce.edu.in</code> account to continue. We’ll ask for your LeetCode username next.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="google-button" onClick={signIn}><span aria-hidden="true">G</span> Continue with Google</button><button className="text-button onboarding-back" onClick={() => setOnboardingStage("briefing")}>Back to challenge details</button></div></section></main>;
   }
-  if (loading) return <main className="onboarding-shell"><section className="onboarding-card"><p className="onboarding-kicker">30DAYS</p><h1>Loading your challenge data…</h1></section></main>;
+  if (loading) return <LoadingScreen label="Loading your challenge data…" />;
+  if (!progress) return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">CONNECTION INTERRUPTED</p><h1>We couldn’t load your profile.</h1><p className="onboarding-copy">{error || "The challenge API did not respond. Check your connection and try again."}</p><div className="onboarding-actions"><button className="primary-button" onClick={() => window.location.reload()}>Retry <span>→</span></button><button className="secondary-button" onClick={signOut}>Log out</button></div></div></section></main>;
   const launchGated = Boolean(siteSettings?.waitlistEnabled && session && !isAdmin);
-  if (launchGated && progress?.profile.leetcode_username) return <LaunchWaitlist name={progress.profile.name} message={siteSettings?.message ?? ""} launchAt={siteSettings?.launchAt ?? null} onSignOut={signOut} />;
-  if (onboardingStage === "waitlist") return <WaitlistDetails name={waitlistName} setName={setWaitlistName} handle={leetcodeHandle} setHandle={setLeetcodeHandle} academicYear={academicYear} setAcademicYear={setAcademicYear} saving={savingProfile} onSave={saveProfile} error={error} notice={launchGated ? (siteSettings?.message || "Registrations are open. The dashboard unlocks at launch.") : ""} />;
+  const editingRegistration = Boolean(progress.profile.leetcode_username);
+  if (!isAdmin && (onboardingStage === "waitlist" || !editingRegistration)) return <WaitlistDetails name={waitlistName} setName={setWaitlistName} handle={leetcodeHandle} setHandle={setLeetcodeHandle} academicYear={academicYear} setAcademicYear={setAcademicYear} saving={savingProfile} onSave={saveProfile} onCancel={editingRegistration ? () => { setError(""); setOnboardingStage("ready"); } : undefined} error={error} notice={launchGated ? (editingRegistration ? (siteSettings?.message || "You’re registered. The dashboard unlocks at launch.") : "Connect your LeetCode handle to complete your waitlist registration.") : ""} />;
+  if (launchGated) return <ComingSoon name={progress.profile.name} handle={progress.profile.leetcode_username ?? ""} academicYear={progress.profile.academic_year ?? "First Year"} email={session.user.email ?? ""} message={siteSettings?.message ?? ""} launchAt={siteSettings?.launchAt ?? null} onEdit={() => { setError(""); setOnboardingStage("waitlist"); }} onSignOut={signOut} />;
 
   const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : [])];
   const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "challenge" ? "TODAY’S QUESTION" : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : view === "admin" ? "ADMIN MONITORING" : "COMMAND CENTER";
 
-  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark">30</span><div><strong>30DAYS</strong><small>COLLEGE SPRINT</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => router.push(item.path)}>{item.label}</button>)}</nav><div className="top-actions"><div className="user-avatar">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</div><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 02</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? "Today’s problem is ready when you are." : view === "progress" ? "A clear record of the work you have actually verified." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
+  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark">30</span><div><strong>30DAYS</strong><small>COLLEGE SPRINT</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => router.push(item.path)}>{item.label}</button>)}</nav><div className="top-actions"><div className="user-avatar">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</div><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? "Today’s problem is ready when you are." : view === "progress" ? "A clear record of the work you have actually verified." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
     {view === "overview" && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); router.push("/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} onSelect={(id) => { setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((item) => item.challenge_id === id) ?? false); setVerifyMessage(""); router.push("/challenge"); }} /></>}
     {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} attemptRecorded={attemptRecorded} recording={recording} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={progress?.statuses.find((item) => item.challenge_id === selectedChallenge?.id)?.status ?? null} awardedPoints={progress?.statuses.find((item) => item.challenge_id === selectedChallenge?.id)?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
     {view === "progress" && <ProgressView progress={progress} verifiedCount={verified.length} challenges={challenges} />}
     {view === "leaderboard" && <Leaderboard rows={leaderboard} query={leaderboardQuery} setQuery={setLeaderboardQuery} />}
     {view === "resources" && <Resources query={resourceQuery} setQuery={setResourceQuery} filtered={filteredResources} />}
     {view === "support" && <Support />}
-    {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} onReturn={() => router.push("/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminLogs(overview.logs); }} />}
+    {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} onReturn={() => router.push("/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminLogs(overview.logs); }} onSettingsSaved={(next) => { setSiteSettings(next); setSettingsError(""); }} />}
   </main><footer><span>30DAYS // COLLEGE SPRINT</span><span>LIVE DATABASE</span></footer></div>;
 }
 
@@ -258,7 +353,7 @@ function Leaderboard({ rows, query, setQuery }: { rows: LeaderboardRow[]; query:
 function PodiumCard({ row, place }: { row: LeaderboardRow; place: "first" | "second" | "third" }) { const initials = row.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase(); const tier = place === "first" ? "GOLD" : place === "second" ? "SILVER" : "BRONZE"; return <article className={`podium podium-${place}`}><div className="podium-topline" /><div className="podium-rank">0{row.rank}</div><div className="podium-tier">{tier} TIER</div><div className="podium-person"><div className="avatar">{initials}</div><div><h3>{row.name}</h3><p>{row.academicYear} · {row.handle}</p></div></div><div className="podium-stats"><span><b>{row.solved}</b> SOLVED</span><span><b>{row.streak}D</b> STREAK</span><span><b>{row.points}</b> SCORE</span></div></article>; }
 function Resources({ query, setQuery, filtered }: { query: string; setQuery: (value: string) => void; filtered: ReadonlyArray<typeof resources[number]> }) { return <section className="resources-page"><div className="resource-controls"><div><span className="resource-count">{filtered.length} resources</span><p>Each link opens in a new tab. Save the paths that fit your current weak spot.</p></div><label className="search-box resource-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search topics or source" aria-label="Search resources" /></label></div>{["DSA Roadmaps & Problem Sheets", "YouTube Learning Resources"].map((category) => { const items = filtered.filter((resource) => resource.category === category); return <section className="resource-section" key={category}><div className="resource-section-heading"><h2>{category}</h2><span>{items.length} listed</span></div>{items.length ? <div className="resource-grid">{items.map((resource) => <article className="resource-card" key={resource.title}><div className="resource-card-top"><span className={`resource-kind ${resource.href ? "" : "pending"}`}>{resource.kind}</span><span aria-hidden="true">{resource.href ? "↗" : "· · ·"}</span></div><h3>{resource.title}</h3><p>{resource.detail}</p>{resource.href ? <a href={resource.href} target="_blank" rel="noreferrer" className="resource-link">Open resource <span>↗</span></a> : <span className="resource-unavailable">Link pending verification</span>}</article>)}</div> : <div className="resource-empty"><strong>No resources match “{query}”.</strong><button className="text-button" onClick={() => setQuery("")}>Clear search</button></div>}</section>; })}</section>; }
 function Support() { return <section className="support-layout"><div className="support-main"><article className="panel support-card"><div className="panel-heading"><div><div className="eyebrow">01 // VERIFICATION SUPPORT</div><h2>Check a submission</h2></div><span className="mini-tag">LIVE RELAY</span></div><p>Need help with a challenge account or verification status? Send the challenge day, your LeetCode username, and the approximate submission time.</p>{supportEmails.length ? <div className="support-contact-grid">{supportEmails.map((email) => <a className="contact-person support-email" href={`mailto:${email}?subject=30DAYS%20verification%20support`} key={email}><div className="avatar">@</div><div><strong>{email}</strong><small>Open Gmail to send a query</small></div><span className="status-dot" /></a>)}</div> : <div className="resource-empty"><strong>Support contacts are not configured yet.</strong><span className="empty-copy">Set NEXT_PUBLIC_SUPPORT_EMAIL_ONE and NEXT_PUBLIC_SUPPORT_EMAIL_TWO.</span></div>}</article><article className="panel support-card"><div className="panel-heading"><div><div className="eyebrow">02 // COHORT SUPPORT DESK</div><h2>What to include in your query</h2></div><span className="mini-tag">EST. RESPONSE · 20M</span></div><div className="chip-row"><span className="chip selected">Submission not verified</span><span className="chip">Changed handle</span><span className="chip">Question clarification</span><span className="chip">Account error</span></div><p>Support can investigate your persisted attempt and verification evidence. Points are never changed from the browser.</p></article></div><aside className="support-side"><article className="panel health-card"><div className="panel-heading"><div><div className="eyebrow">LIVE INFRASTRUCTURE</div><h2>Operational</h2></div><span className="health-badge"><span className="status-dot" /> DATABASE</span></div><div className="sparkline"><i /><i /><i /><i /><i /><i /><i /><i /><i /></div><div className="health-row"><span>LeetCode verification</span><strong>async</strong></div><div className="health-row"><span>Point awards</span><strong>idempotent</strong></div><div className="health-row"><span>Support relay</span><strong>online</strong></div></article><article className="panel contact-card"><div className="eyebrow">SELECTED SUPPORT CONTACTS</div><h2>Live relay contacts</h2><p>Available to the cohort operations group during the active sprint window.</p>{supportEmails.length ? supportEmails.map((email) => <a className="contact-person support-email" href={`mailto:${email}?subject=30DAYS%20support%20query`} key={`side-${email}`}><div className="avatar small">@</div><div><strong>{email}</strong><small>Support relay</small></div><span className="status-dot" /></a>) : <p className="empty-copy">Configure the support addresses to show contacts.</p>}</article></aside></section>; }
-function AdminDashboard({ api, token, metrics, challenges, users, jobs, logs, onReturn, onRefresh }: { api: string; token: string; metrics: AdminMetrics | null; challenges: AdminChallenge[]; users: AdminUser[]; jobs: AdminJob[]; logs: AdminLog[]; onReturn: () => void; onRefresh: (overview: { metrics: AdminMetrics; challenges: AdminChallenge[]; users: AdminUser[]; jobs: AdminJob[]; logs: AdminLog[] }) => void }) {
+function AdminDashboard({ api, token, metrics, challenges, users, jobs, logs, onReturn, onRefresh, onSettingsSaved }: { api: string; token: string; metrics: AdminMetrics | null; challenges: AdminChallenge[]; users: AdminUser[]; jobs: AdminJob[]; logs: AdminLog[]; onReturn: () => void; onRefresh: (overview: { metrics: AdminMetrics; challenges: AdminChallenge[]; users: AdminUser[]; jobs: AdminJob[]; logs: AdminLog[] }) => void; onSettingsSaved: (settings: SiteSettings) => void }) {
   const [tab, setTab] = useState<"questions" | "verification" | "logs" | "settings">("questions");
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState<Partial<AdminChallenge>>({});
@@ -280,8 +375,18 @@ function AdminDashboard({ api, token, metrics, challenges, users, jobs, logs, on
   const headers = { "content-type": "application/json", Authorization: `Bearer ${token}` };
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<{ waitlistEnabled: boolean; message: string; launchAt: string }>({ waitlistEnabled: true, message: "", launchAt: "" });
-  useEffect(() => { void (async () => { const response = await fetch(`${api}/api/admin/settings`, { headers }); if (response.ok) { const body = await response.json() as SiteSettings; setSettings(body); setSettingsDraft({ waitlistEnabled: body.waitlistEnabled, message: body.message, launchAt: body.launchAt ? new Date(body.launchAt).toISOString().slice(0, 16) : "" }); } })().catch(() => {}); }, []);
-  async function saveSettings() { setBusy("settings"); setMessage(""); try { const response = await fetch(`${api}/api/admin/settings`, { method: "PATCH", headers, body: JSON.stringify({ waitlistEnabled: settingsDraft.waitlistEnabled, message: settingsDraft.message, launchAt: settingsDraft.launchAt ? new Date(settingsDraft.launchAt).toISOString() : null }) }); if (!response.ok) throw new Error("Couldn’t save settings. Apply migration 005_site_settings.sql in Supabase first."); const body = await response.json() as SiteSettings; setSettings(body); setMessage(body.waitlistEnabled ? "Waitlist mode is ON. Students can register but not reach the dashboard." : "Waitlist mode is OFF. Dashboard is live for everyone."); } catch (error) { setMessage(error instanceof Error ? error.message : "Couldn’t save settings."); } finally { setBusy(""); } }
+  useEffect(() => {
+    const requestHeaders = { "content-type": "application/json", Authorization: `Bearer ${token}` };
+    void (async () => {
+      const response = await fetch(`${api}/api/admin/settings`, { headers: requestHeaders });
+      if (response.ok) {
+        const body = await response.json() as SiteSettings;
+        setSettings(body);
+        setSettingsDraft({ waitlistEnabled: body.waitlistEnabled, message: body.message, launchAt: body.launchAt ? new Date(body.launchAt).toISOString().slice(0, 16) : "" });
+      }
+    })().catch(() => {});
+  }, [api, token]);
+  async function saveSettings() { setBusy("settings"); setMessage(""); try { const response = await fetch(`${api}/api/admin/settings`, { method: "PATCH", headers, body: JSON.stringify({ waitlistEnabled: settingsDraft.waitlistEnabled, message: settingsDraft.message, launchAt: settingsDraft.launchAt ? new Date(settingsDraft.launchAt).toISOString() : null }) }); if (!response.ok) throw new Error("Couldn’t save settings. Apply migration 005_site_settings.sql in Supabase first."); const body = await response.json() as SiteSettings; setSettings(body); onSettingsSaved(body); setMessage(body.waitlistEnabled ? "Waitlist mode is ON. Students can register but not reach the dashboard." : "Waitlist mode is OFF. Dashboard is live for everyone."); } catch (error) { setMessage(error instanceof Error ? error.message : "Couldn’t save settings."); } finally { setBusy(""); } }
   async function refresh() { const response = await fetch(`${api}/api/admin/overview`, { headers }); if (!response.ok) throw new Error("Couldn’t refresh admin data."); onRefresh(await response.json() as { metrics: AdminMetrics; challenges: AdminChallenge[]; users: AdminUser[]; jobs: AdminJob[]; logs: AdminLog[] }); }
   async function saveChallenge(challengeId: string) { setBusy(`save-${challengeId}`); setMessage(""); try { const response = await fetch(`${api}/api/admin/challenges/${challengeId}`, { method: "PATCH", headers, body: JSON.stringify(draft) }); if (!response.ok) throw new Error("Couldn’t save the question."); setEditingId(""); await refresh(); setMessage("Question updated."); } catch (error) { setMessage(error instanceof Error ? error.message : "Couldn’t save the question."); } finally { setBusy(""); } }
   async function createChallenge() { if (!newDay.trim() || !newTitle.trim() || !newSlug.trim() || !newTopic.trim() || !newPublishedAt || !newDeadlineAt) return setMessage("Fill day, title, slug, topic, publish and deadline times."); setBusy("create"); setMessage(""); try { const response = await fetch(`${api}/api/admin/challenges`, { method: "POST", headers, body: JSON.stringify({ day: Number(newDay), title: newTitle.trim(), slug: newSlug.trim().toLowerCase(), difficulty: newDifficulty, topic: newTopic.trim(), points: Number(newPoints), published_at: new Date(newPublishedAt).toISOString(), deadline_at: new Date(newDeadlineAt).toISOString() }) }); const body = await response.json().catch(() => ({})) as { error?: string; challenge?: AdminChallenge }; if (!response.ok) throw new Error(body.error === "day_or_slug_taken" ? "Day or slug already taken. Pick another day/slug." : "Couldn’t add the question."); setNewDay(""); setNewTitle(""); setNewSlug(""); setNewTopic(""); setNewPublishedAt(""); setNewDeadlineAt(""); setShowCreate(false); await refresh(); setMessage(`Day ${body.challenge?.day} added.`); } catch (error) { setMessage(error instanceof Error ? error.message : "Couldn’t add the question."); } finally { setBusy(""); } }
@@ -292,6 +397,60 @@ function AdminDashboard({ api, token, metrics, challenges, users, jobs, logs, on
   return <section className="admin-dashboard"><section className="leaderboard-metrics"><Metric label="BACKEND HEALTH" value={metrics?.health ?? "Checking"} detail="API and worker availability" accent /><Metric label="ACTIVE PARTICIPANTS" value={String(metrics?.participants ?? "—")} detail="Persisted student profiles" accent /><Metric label="VERIFIED COMPLETIONS" value={String(metrics?.verified ?? "—")} detail="Persisted verification results" accent /><Metric label="WAITING / RETRYING" value={String(metrics?.queued ?? "—")} detail="Jobs needing worker attention" /></section><article className="panel admin-explainer"><div><div className="eyebrow">ADMIN OPERATIONS</div><h2>Control the sprint safely.</h2><p>Edit the question sequence, run verification, inspect failures, and manually resolve exceptional submissions. Every action is logged.</p><div className="admin-status-row"><span><span className="status-dot" /> {metrics?.failed ?? "—"} terminal failures</span><span>Admin-only data</span></div></div><div className="admin-explainer-actions"><button className="secondary-button" onClick={runWorker} disabled={busy === "run"}>{busy === "run" ? "Starting…" : "Run verification now"}</button><button className="text-button" onClick={onReturn}>Return to dashboard</button></div></article><div className="admin-tabs" role="tablist"><button className={tab === "questions" ? "active" : ""} onClick={() => setTab("questions")}>Questions <span>{challenges.length}</span></button><button className={tab === "verification" ? "active" : ""} onClick={() => setTab("verification")}>Verification <span>{jobs.filter((job) => ["queued", "processing", "retry"].includes(job.status)).length}</span></button><button className={tab === "logs" ? "active" : ""} onClick={() => setTab("logs")}>Logs <span>{logs.length}</span></button><button className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Settings{settings && <span>{settings.waitlistEnabled ? "ON" : "OFF"}</span>}</button></div>{message && <div className="admin-message" role="status">{message}</div>}{tab === "questions" && <section className="admin-columns"><article className="panel"><div className="panel-heading"><div><div className="eyebrow">ADD QUESTION</div><h2>Publish a new challenge</h2></div><button className="text-button" onClick={() => setShowCreate(!showCreate)}>{showCreate ? "Hide" : "+ Add"}</button></div>{showCreate && <><div className="admin-form-grid"><label>Day (1-30)<input type="number" min="1" max="30" value={newDay} onChange={(event) => setNewDay(event.target.value)} placeholder="e.g. 2" /></label><label>Title<input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Two Sum" /></label><label>Slug (leetcode id)<input value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="two-sum" /></label><label>Difficulty<select value={newDifficulty} onChange={(event) => setNewDifficulty(event.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Topic<input value={newTopic} onChange={(event) => setNewTopic(event.target.value)} placeholder="Arrays" /></label><label>Points<input type="number" min="1" max="100" value={newPoints} onChange={(event) => setNewPoints(Number(event.target.value))} /></label><label>Publish at<input type="datetime-local" value={newPublishedAt} onChange={(event) => setNewPublishedAt(event.target.value)} /></label><label>Deadline at<input type="datetime-local" value={newDeadlineAt} onChange={(event) => setNewDeadlineAt(event.target.value)} /></label></div><div className="admin-row-actions"><button className="primary-button" onClick={createChallenge} disabled={busy === "create"}>{busy === "create" ? "Adding…" : "Add question"}</button></div></>}</article><article className="panel"><div className="panel-heading"><div><div className="eyebrow">QUESTION SEQUENCE</div><h2>Order and edit questions</h2></div><span className="mini-tag">DRAG-FREE SAFE ORDER</span></div>{challenges.length ? <div className="admin-question-list">{challenges.map((challenge, index) => editingId === challenge.id ? <div className="admin-question-row editing" key={challenge.id}><span className="question-day">DAY {String(challenge.day).padStart(2, "0")}</span><div className="admin-form-grid"><label>Title<input value={String(draft.title ?? challenge.title)} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label><label>Slug<input value={String(draft.slug ?? challenge.slug)} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} /></label><label>Difficulty<select value={String(draft.difficulty ?? challenge.difficulty)} onChange={(event) => setDraft({ ...draft, difficulty: event.target.value })}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Topic<input value={String(draft.topic ?? challenge.topic)} onChange={(event) => setDraft({ ...draft, topic: event.target.value })} /></label><label>Points<input type="number" min="1" max="100" value={Number(draft.points ?? challenge.points)} onChange={(event) => setDraft({ ...draft, points: Number(event.target.value) })} /></label></div><div className="admin-row-actions"><button className="primary-button" onClick={() => saveChallenge(challenge.id)} disabled={busy === `save-${challenge.id}`}>{busy === `save-${challenge.id}` ? "Saving…" : "Save question"}</button><button className="secondary-button" onClick={() => setEditingId("")}>Cancel</button></div></div> : <div className="admin-question-row" key={challenge.id}><span className="question-day">DAY {String(challenge.day).padStart(2, "0")}</span><div className="admin-question-copy"><strong>{challenge.title}</strong><small>{challenge.slug} · {challenge.difficulty} · {challenge.points} pts</small></div><button className="admin-icon-button" onClick={() => moveChallenge(index, -1)} disabled={index === 0 || busy === "reorder"} aria-label={`Move ${challenge.title} up`}>↑</button><button className="admin-icon-button" onClick={() => moveChallenge(index, 1)} disabled={index === challenges.length - 1 || busy === "reorder"} aria-label={`Move ${challenge.title} down`}>↓</button><button className="text-button" onClick={() => { setEditingId(challenge.id); setDraft(challenge); }}>Edit</button></div>)}</div> : <p className="empty-copy">No questions are available yet. Add the first challenge in Supabase.</p>}</article></section>}{tab === "verification" && <section className="admin-columns"><article className="panel"><div className="eyebrow">MANUAL VERIFICATION</div><h2>Resolve an exceptional submission</h2><p>Use this only when you have confirmed the accepted submission. The backend still applies the 100/70 point rule and prevents duplicate awards.</p><div className="admin-form-grid"><label>User<select value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="">Choose a user</option>{users.map((user) => <option value={user.id} key={user.id}>{user.name} · @{user.leetcode_username ?? "no handle"}</option>)}</select></label><label>Question<select value={selectedChallenge} onChange={(event) => setSelectedChallenge(event.target.value)}><option value="">Choose a question</option>{challenges.map((challenge) => <option value={challenge.id} key={challenge.id}>Day {challenge.day} · {challenge.title}</option>)}</select></label><label>Submission ID / URL<input value={submissionId} onChange={(event) => setSubmissionId(event.target.value)} placeholder="LeetCode submission ID or URL" /></label><label>Accepted at<input type="datetime-local" value={submissionAt} onChange={(event) => setSubmissionAt(event.target.value)} /></label></div><div className="admin-row-actions"><button className="secondary-button" onClick={queueVerification} disabled={busy === "queue"}>{busy === "queue" ? "Queueing…" : "Start verification for user"}</button><button className="primary-button" onClick={manualVerify} disabled={busy === "manual"}>{busy === "manual" ? "Verifying…" : "Manually verify"}</button></div></article><article className="panel"><div className="panel-heading"><div><div className="eyebrow">WORKER STATUS</div><h2>Verification jobs</h2></div><button className="text-button" onClick={refresh}>Refresh</button></div>{jobs.length ? <div className="admin-job-list">{jobs.map((job) => <div className="admin-job-row" key={job.id}><div><strong>{job.profile?.name ?? "Unknown user"}</strong><small>Day {job.challenge?.day ?? "—"} · {job.challenge?.title ?? job.challenge_id}</small></div><span className={`job-status ${job.status}`}>{job.status}</span><span className="job-error">{job.last_error ?? `${job.attempts} attempts`}</span></div>)}</div> : <p className="empty-copy">No verification jobs yet.</p>}</article></section>}{tab === "settings" && <section className="panel"><div className="panel-heading"><div><div className="eyebrow">LAUNCH CONTROL</div><h2>Waitlist mode</h2></div><span className="mini-tag">{settingsDraft.waitlistEnabled ? "WAITLIST ON" : "LIVE"}</span></div><p className="empty-copy">When ON, students can sign in and register (name, LeetCode handle, year) but cannot reach the dashboard, see questions, or trigger verification. Admins always bypass the gate. Turn it OFF on Sunday to launch Day 1.</p><div className="admin-form-grid"><label>Waitlist mode<select value={settingsDraft.waitlistEnabled ? "on" : "off"} onChange={(event) => setSettingsDraft({ ...settingsDraft, waitlistEnabled: event.target.value === "on" })}><option value="on">ON — registration only</option><option value="off">OFF — dashboard live</option></select></label><label>Launch date & time<input type="datetime-local" value={settingsDraft.launchAt} onChange={(event) => setSettingsDraft({ ...settingsDraft, launchAt: event.target.value })} /></label><label>Waitlist message<input value={settingsDraft.message} onChange={(event) => setSettingsDraft({ ...settingsDraft, message: event.target.value })} placeholder="Day 1 drops Sunday at 6:00 PM IST…" /></label></div><div className="admin-row-actions"><button className="primary-button" onClick={saveSettings} disabled={busy === "settings"}>{busy === "settings" ? "Saving…" : "Save settings"}</button></div></section>}{tab === "logs" && <section className="panel"><div className="panel-heading"><div><div className="eyebrow">AUDIT TRAIL</div><h2>Admin actions and worker outcomes</h2></div><button className="text-button" onClick={refresh}>Refresh logs</button></div>{logs.length ? <div className="admin-log-list">{logs.map((log) => <div className="admin-log" key={log.id}><span className={`job-status ${log.status}`}>{log.status}</span><div><strong>{log.action}</strong><p>{log.message}</p><small>{formatDate(log.created_at)}</small></div></div>)}</div> : <p className="empty-copy">No admin actions have been recorded yet.</p>}</section>}</section>;
 }
 function EmptyPanel({ title, copy }: { title: string; copy: string }) { return <article className="panel empty-state"><h2>{title}</h2><p className="empty-copy">{copy}</p></article>; }
-function ProfileSetup({ handle, setHandle, saving, onSave }: { handle: string; setHandle: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void }) { return <article className="panel profile-setup"><div><div className="eyebrow">ONE-TIME SETUP</div><h2>Connect your LeetCode profile</h2><p className="empty-copy">Paste your username or profile URL. We use it to verify accepted submissions.</p></div><form className="inline-form" onSubmit={onSave}><label htmlFor="leetcode-handle">LeetCode username or profile URL</label><input id="leetcode-handle" value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="https://leetcode.com/u/username" required /><button className="primary-button" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></article>; }
-function LaunchWaitlist({ name, message, launchAt, onSignIn, onSignOut }: { name: string; message: string; launchAt: string | null; onSignIn?: () => void; onSignOut?: () => void }) { return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">YOU’RE ON THE LIST</p><h1>See you at launch{ name ? `, ${name.split(" ")[0]}` : ""}.</h1><p className="onboarding-copy">{message || "Registrations are open. The dashboard unlocks at launch."}</p>{launchAt && <p className="onboarding-copy">Launch · {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(launchAt))} IST</p>}<div className="onboarding-actions">{onSignIn && <button className="primary-button onboarding-action" onClick={onSignIn}>Register with Google <span>→</span></button>}{onSignOut && <button className="secondary-button" onClick={onSignOut}>Log out</button>}</div><p className="onboarding-copy">RVCE students only · @rvce.edu.in account required.</p></div></section></main>; }
-function WaitlistDetails({ name, setName, handle, setHandle, academicYear, setAcademicYear, saving, onSave, error, notice = "" }: { name: string; setName: (value: string) => void; handle: string; setHandle: (value: string) => void; academicYear: string; setAcademicYear: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void; error: string; notice?: string }) { return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">JOIN THE SPRINT</p><h1>Tell us where you are starting.</h1><p className="onboarding-copy">These details connect your verified work to your challenge record.</p>{notice && <p className="onboarding-copy" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}<form className="onboarding-form" onSubmit={onSave}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label><label>LeetCode username or profile URL<input value={handle} onChange={(event) => setHandle(event.target.value)} autoComplete="url" placeholder="https://leetcode.com/u/username" required /></label><label>Academic year<select value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}><option>First Year</option><option>Second Year</option><option>Third Year</option><option>Fourth Year</option></select></label><button className="primary-button onboarding-action" type="submit" disabled={saving}>{saving ? "Saving…" : "Join the sprint"} <span>→</span></button></form></div></section></main>; }
+function LoadingScreen({ label }: { label: string }) { return <main className="onboarding-shell"><section className="onboarding-card"><p className="onboarding-kicker">30DAYS</p><h1>{label}</h1></section></main>; }
+function LaunchWaitlist({ message, launchAt, onSignIn, error }: { message: string; launchAt: string | null; onSignIn: () => void; error?: string }) { return <main className="onboarding-shell coming-soon-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">SEASON 01 · REGISTRATIONS OPEN</p><h1>The first 30-day sprint starts soon.</h1><p className="onboarding-copy">{message || "A focused 30-day LeetCode sprint for RVCE students. Register with your college account to reserve your place before Day 1."}</p>{launchAt && <p className="onboarding-copy">Launch · {formatDate(launchAt)} IST</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="onboarding-actions"><button className="primary-button" onClick={onSignIn}>Register with Google <span>→</span></button></div><p className="onboarding-copy">RVCE students only · @rvce.edu.in account required.</p></div></section></main>; }
+function ComingSoon({ name, handle, academicYear, email, message, launchAt, onEdit, onSignOut }: { name: string; handle: string; academicYear: string; email: string; message: string; launchAt: string | null; onEdit: () => void; onSignOut: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!launchAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [launchAt]);
+  const firstName = name.trim().split(/\s+/)[0] ?? "";
+  const target = launchAt ? Date.parse(launchAt) : null;
+  const remaining = target !== null && Number.isFinite(target) ? Math.max(0, target - now) : null;
+  const countdown = remaining !== null && remaining > 0 ? [
+    { label: "DAYS", value: Math.floor(remaining / 86_400_000) },
+    { label: "HOURS", value: Math.floor((remaining % 86_400_000) / 3_600_000) },
+    { label: "MINUTES", value: Math.floor((remaining % 3_600_000) / 60_000) },
+    { label: "SECONDS", value: Math.floor((remaining % 60_000) / 1_000) },
+  ] : null;
+  const countdownLabel = countdown && remaining !== null && remaining > 0 ? `${countdown[0].value} days, ${countdown[1].value} hours and ${countdown[2].value} minutes until launch` : "Launch window is open";
+  return (
+    <main className="onboarding-shell coming-soon-shell">
+      <div className="onboarding-grid" aria-hidden="true" />
+      <section className="coming-soon-card" aria-labelledby="coming-soon-title">
+        <header className="coming-soon-top">
+          <div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div>
+          <span className="coming-soon-status"><span className="pulse" /> WAITLIST CONFIRMED</span>
+        </header>
+        <div className="coming-soon-body">
+          <p className="onboarding-kicker">YOU’RE ON THE LIST{firstName ? ` · ${firstName.toUpperCase()}` : ""}</p>
+          <h1 id="coming-soon-title">The sprint starts soon.</h1>
+          <p className="onboarding-copy">{message || "Your registration is locked in. The dashboard opens when Season 01 goes live."}</p>
+          <div className="coming-soon-launch">
+            <div className="coming-soon-launch-head"><span>LAUNCH SEQUENCE</span><span>{launchAt ? `${formatDate(launchAt)} IST` : "DATE TO BE ANNOUNCED"}</span></div>
+            {countdown ? <div className="coming-soon-countdown" aria-label={countdownLabel}>{countdown.map((part) => <div key={part.label}><strong>{String(part.value).padStart(2, "0")}</strong><span>{part.label}</span></div>)}</div> : <div className="coming-soon-tba"><span className="pulse" /> {remaining === 0 ? "Launch window is open. Waiting for the cohort switch." : "Launch timing will be announced here"}</div>}
+            <p className="coming-soon-launch-note">{remaining === 0 ? "The dashboard unlocks as soon as the cohort is switched live." : remaining === null ? "Check back for the launch date, or keep this tab open." : "This page unlocks the dashboard automatically when the cohort goes live."}</p>
+          </div>
+          <div className="coming-soon-summary">
+            <div><span>REGISTERED AS</span><strong>{name.trim() || "RVCE student"}</strong><small>{email || "College Google account"}</small></div>
+            <div><span>LEETCODE</span><strong>{handle ? <a href={`https://leetcode.com/u/${handle}/`} target="_blank" rel="noreferrer">{handle}</a> : "Not connected"}</strong><small>Accepted submissions verify automatically</small></div>
+            <div><span>ACADEMIC YEAR</span><strong>{academicYear}</strong><small>Season 01 cohort</small></div>
+          </div>
+          <div className="coming-soon-steps">
+            <div><b>01</b><div><strong>Registration locked</strong><p>Your profile and LeetCode handle are on the cohort list.</p></div></div>
+            <div><b>02</b><div><strong>Dashboard unlocks</strong><p>One question drops each day at 6:00 PM IST once the sprint begins.</p></div></div>
+            <div><b>03</b><div><strong>Solve, verify, score</strong><p>One accepted submission per challenge awards points exactly once.</p></div></div>
+          </div>
+          <div className="onboarding-actions coming-soon-actions">
+            <button className="primary-button" onClick={onEdit}>Update details <span>→</span></button>
+            <button className="secondary-button" onClick={onSignOut}>Log out</button>
+          </div>
+          <p className="coming-soon-note">RVCE students only · @rvce.edu.in account required{supportEmails.length ? <> · <a href={`mailto:${supportEmails[0]}?subject=30DAYS%20waitlist%20support`}>Contact support</a></> : null}</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+function WaitlistDetails({ name, setName, handle, setHandle, academicYear, setAcademicYear, saving, onSave, onCancel, error, notice = "" }: { name: string; setName: (value: string) => void; handle: string; setHandle: (value: string) => void; academicYear: string; setAcademicYear: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void; onCancel?: () => void; error: string; notice?: string }) { return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span>30</span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">{onCancel ? "YOUR REGISTRATION" : "JOIN THE SPRINT"}</p><h1>{onCancel ? "Keep your details current." : "Tell us where you are starting."}</h1><p className="onboarding-copy">These details connect your verified work to your challenge record.</p>{notice && <p className="onboarding-copy" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}<form className="onboarding-form" onSubmit={onSave}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label><label>LeetCode username or profile URL<input value={handle} onChange={(event) => setHandle(event.target.value)} autoComplete="url" placeholder="https://leetcode.com/u/username" required /></label><label>Academic year<select value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}><option>First Year</option><option>Second Year</option><option>Third Year</option><option>Fourth Year</option></select></label><button className="primary-button onboarding-action" type="submit" disabled={saving}>{saving ? "Saving…" : onCancel ? "Save changes" : "Join the sprint"} <span>→</span></button>{onCancel && <button className="secondary-button waitlist-cancel" type="button" onClick={onCancel}>Back to waitlist status</button>}</form></div></section></main>; }

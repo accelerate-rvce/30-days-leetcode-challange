@@ -2,9 +2,13 @@ import { Request, Response, Router } from "express";
 import { z } from "zod";
 import { adminIdFromAccessToken, createAdminChallenge, getAdminAuditLogs, getAdminChallenges, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
+import { leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
 const router = Router();
 const authToken = (value?: string) => value?.replace(/^Bearer\s+/i, "");
+const configuredKickCooldown = Number(process.env.VERIFICATION_KICK_COOLDOWN_MS ?? 15_000);
+const verificationKickCooldownMs = Number.isFinite(configuredKickCooldown) ? Math.max(0, configuredKickCooldown) : 15_000;
+const lastVerificationKick = new Map<string, number>();
 async function requireAdmin(req: Request, res: Response) {
   if (!persistenceEnabled) { res.status(503).json({ error: "persistence_not_configured" }); return null; }
   const adminId = await adminIdFromAccessToken(authToken(req.header("authorization")));
@@ -25,12 +29,13 @@ function normalizeLeetCodeUsername(value: string) {
 
 // Waitlist gate: when enabled, only admins may see challenges, attempt
 // questions, or trigger verification. Registration (sign-in + PATCH
-// /profile) always stays open. Missing table = gate open (pre-migration).
+// /profile) always stays open. If settings cannot be read, fail closed rather
+// than exposing student data or challenge content.
 async function launchOpen(req: Request): Promise<boolean> {
   try {
     const settings = await getSiteSettings();
     if (!settings.waitlistEnabled) return true;
-  } catch { return true; }
+  } catch { return false; }
   try {
     return Boolean(await adminIdFromAccessToken(authToken(req.header("authorization"))));
   } catch { return false; }
@@ -41,7 +46,7 @@ router.get("/settings", async (_req, res) => {
   try {
     return res.json(await getSiteSettings());
   } catch {
-    return res.json({ waitlistEnabled: false, message: "", launchAt: null });
+    return res.status(503).json({ error: "settings_unavailable" });
   }
 });
 
@@ -79,9 +84,22 @@ router.post("/verification/request", async (req, res) => {
   await enqueuePersistentVerification(profileId, parsed.data.challengeId);
   // Kick off a verification cycle immediately so 1 accepted LeetCode
   // submission awards points within seconds instead of waiting for the
-  // 60s timer / 10min cron. Fire-and-forget: response stays fast.
-  void runPersistentVerificationCycle().catch(() => {});
-  return res.status(202).json({ queued: true, persisted: true });
+  // 60s timer / 10min cron. A per-profile cooldown prevents a student from
+  // turning repeated clicks into a stream of LeetCode requests.
+  const now = Date.now();
+  const lastKick = lastVerificationKick.get(profileId) ?? 0;
+  const immediate = now - lastKick >= verificationKickCooldownMs;
+  if (immediate) {
+    lastVerificationKick.set(profileId, now);
+    // Keep the fire-and-forget response fast; the cron/timer is the fallback.
+    void runPersistentVerificationCycle().catch(() => {});
+    if (lastVerificationKick.size > 5_000) {
+      for (const [id, at] of lastVerificationKick) {
+        if (now - at > 60 * 60_000) lastVerificationKick.delete(id);
+      }
+    }
+  }
+  return res.status(202).json({ queued: true, persisted: true, immediate });
 });
 
 router.post("/cron/verify", async (req, res) => {
@@ -116,6 +134,7 @@ router.patch("/profile", async (req, res) => {
 
 router.get("/leaderboard", async (req, res) => {
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  if (!await launchOpen(req)) return res.status(403).json({ error: "launch_not_open" });
   const rows = (await getPersistentLeaderboard(String(req.query.search ?? "").toLowerCase())) ?? [];
   return res.json({ currentDay: rows.length ? 0 : null, totalParticipants: rows.length, verifiedCompletions: 0, updatedAt: new Date().toISOString(), rows });
 });
@@ -123,7 +142,8 @@ router.get("/leaderboard", async (req, res) => {
 router.get("/jobs/metrics", async (req, res) => {
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
   if (!await adminIdFromAccessToken(authToken(req.header("authorization")))) return res.status(403).json({ error: "admin_access_required" });
-  return res.json({ ...(await getPersistentJobMetrics()), paused: false, pausedUntil: null, recentAlerts: [] });
+  const cooldownMs = leetcodeRateLimitRemainingMs();
+  return res.json({ ...(await getPersistentJobMetrics()), paused: cooldownMs > 0, pausedUntil: cooldownMs > 0 ? new Date(Date.now() + cooldownMs).toISOString() : null, recentAlerts: [] });
 });
 
 router.get("/admin/metrics", async (req, res) => {

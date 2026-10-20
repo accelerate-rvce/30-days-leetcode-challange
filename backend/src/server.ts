@@ -20,7 +20,9 @@ app.get("/health", (_request, response) => {
   response.json({ status: "ok", service: "30days-backend" });
 });
 
-const verificationTimer = setInterval(() => { void runPersistentVerificationCycle(); }, 60_000);
+const verificationTimer = setInterval(() => {
+  void runPersistentVerificationCycle().catch((error) => console.error("verification cycle failed", error));
+}, 60_000);
 verificationTimer.unref();
 
 app.listen(port, host, () => {

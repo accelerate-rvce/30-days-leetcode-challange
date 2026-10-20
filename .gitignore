@@ -71,6 +71,7 @@ lerna-debug.log*
 backend/node_modules
 backend/.env
 backend/build
+backend/dist
 backend/coverage
 
 # Frontend specific
