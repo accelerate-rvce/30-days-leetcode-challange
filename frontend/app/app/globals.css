@@ -17,6 +17,9 @@
   --accent-purple-soft: #c4b5fd;
   --brand-gradient: linear-gradient(120deg, var(--accent) 0%, var(--accent-blue) 48%, var(--accent-purple) 100%);
   --brand-glow: radial-gradient(circle at 50% 50%, rgba(34, 211, 238, .22), rgba(168, 85, 247, .12) 55%, transparent 72%);
+  --pointer-x: 50vw;
+  --pointer-y: 30vh;
+  --grid-glow-opacity: 0;
   --red: #fb7185;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --color-background: var(--background);
@@ -186,6 +189,21 @@ button { cursor: pointer; }
     linear-gradient(rgba(34, 211, 238, .06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(168, 85, 247, .055) 1px, transparent 1px);
 }
+.app-shell::after {
+  background-image:
+    linear-gradient(rgba(34, 211, 238, .5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 85, 247, .42) 1px, transparent 1px);
+  background-size: 50px 50px;
+  content: "";
+  inset: 0;
+  mask-image: radial-gradient(circle 180px at var(--pointer-x) var(--pointer-y), #000 0%, rgba(0, 0, 0, .65) 38%, transparent 72%);
+  opacity: var(--grid-glow-opacity);
+  pointer-events: none;
+  position: fixed;
+  transition: opacity 280ms var(--ease-out);
+  will-change: opacity;
+  z-index: 0;
+}
 .topbar {
   background: rgba(4, 5, 10, .8);
   border-bottom-color: rgba(56, 189, 248, .14);
@@ -291,6 +309,20 @@ button { cursor: pointer; }
     linear-gradient(rgba(34, 211, 238, .065) 1px, transparent 1px),
     linear-gradient(90deg, rgba(168, 85, 247, .06) 1px, transparent 1px);
 }
+.onboarding-grid::after {
+  background-image:
+    linear-gradient(rgba(34, 211, 238, .5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 85, 247, .42) 1px, transparent 1px);
+  background-size: 50px 50px;
+  content: "";
+  inset: 0;
+  mask-image: radial-gradient(circle 180px at var(--pointer-x) var(--pointer-y), #000 0%, rgba(0, 0, 0, .65) 38%, transparent 72%);
+  opacity: var(--grid-glow-opacity);
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 280ms var(--ease-out);
+  will-change: opacity;
+}
 .onboarding-card {
   background:
     linear-gradient(150deg, rgba(34, 211, 238, .055), transparent 32%),
@@ -328,4 +360,10 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
 @media (max-width: 680px) {
   .onboarding-brand small { margin-left: 46px; width: calc(100% - 46px); }
   .coming-soon-top .onboarding-brand small { margin-left: 46px; width: calc(100% - 46px); }
+}
+@media (pointer: coarse) {
+  .app-shell::after, .onboarding-grid::after { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell::after, .onboarding-grid::after { transition: none; }
 }

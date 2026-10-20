@@ -54,6 +54,52 @@ async function fetchSiteSettings(api: string, signal?: AbortSignal): Promise<Sit
   return { waitlistEnabled: body.waitlistEnabled, message: body.message, launchAt: body.launchAt ?? null };
 }
 
+function useGridSpotlight() {
+  useEffect(() => {
+    const root = document.documentElement;
+    let frame = 0;
+    let x = 0;
+    let y = 0;
+    let active = false;
+
+    const paint = () => {
+      frame = 0;
+      root.style.setProperty("--pointer-x", `${x}px`);
+      root.style.setProperty("--pointer-y", `${y}px`);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+      x = event.clientX;
+      y = event.clientY;
+      if (!active) {
+        active = true;
+        root.style.setProperty("--grid-glow-opacity", "1");
+      }
+      if (!frame) frame = window.requestAnimationFrame(paint);
+    };
+
+    const hideSpotlight = () => {
+      active = false;
+      root.style.setProperty("--grid-glow-opacity", "0");
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    document.documentElement.addEventListener("pointerleave", hideSpotlight);
+    window.addEventListener("blur", hideSpotlight);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", onPointerMove);
+      document.documentElement.removeEventListener("pointerleave", hideSpotlight);
+      window.removeEventListener("blur", hideSpotlight);
+      root.style.removeProperty("--pointer-x");
+      root.style.removeProperty("--pointer-y");
+      root.style.removeProperty("--grid-glow-opacity");
+    };
+  }, []);
+}
+
 function AccelerateMark() {
   const gradientId = `accelerate-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
@@ -118,6 +164,7 @@ export default function Home() {
   const [settingsRetry, setSettingsRetry] = useState(0);
   const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   const token = session?.access_token;
+  useGridSpotlight();
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIntroComplete(true), 2400);
