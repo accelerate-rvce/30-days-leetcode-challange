@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
-import ParticleText from "../components/ParticleText";
+import ParticleText from "./ParticleText";
 
 type View = "overview" | "challenge" | "progress" | "leaderboard" | "resources" | "support" | "admin";
 type OnboardingStage = "welcome" | "briefing" | "signin" | "waitlist" | "ready";
@@ -152,7 +152,7 @@ function AccelerateMark() {
   );
 }
 
-export default function Home() {
+export default function ChallengeApp() {
   const router = useRouter();
   const pathname = usePathname();
   const view = viewFor(pathname);
