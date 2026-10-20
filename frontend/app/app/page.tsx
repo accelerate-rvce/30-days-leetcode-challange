@@ -188,7 +188,7 @@ export default function Home() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState("");
   const [settingsRetry, setSettingsRetry] = useState(0);
-  const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  const api = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:4000").replace(/\/+$/, "");
   const token = session?.access_token;
   useGridSpotlight();
 
