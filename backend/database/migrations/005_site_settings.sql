@@ -11,6 +11,5 @@ alter table site_settings enable row level security;
 -- questions, or trigger verification. Admins always bypass the gate.
 insert into site_settings(key, value) values
   ('waitlist_enabled', 'true'),
-  ('waitlist_message', '"Day 1 drops Sunday at 6:00 PM IST. You are registered — the dashboard unlocks at launch."'),
-  ('launch_at', '"2026-10-18T12:30:00+00:00"')
+  ('waitlist_message', '"Day 1 drops soon. Your dashboard unlocks automatically when the cohort launches."')
 on conflict (key) do nothing;
