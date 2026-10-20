@@ -32,7 +32,7 @@ export async function userIdFromAccessToken(token?: string) {
   if (!isConfiguredAdmin && !email?.endsWith("@rvce.edu.in")) return null;
   const { data: existingProfile } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (isConfiguredAdmin && existingProfile && existingProfile.role !== "admin") await db.from("profiles").update({ role: "admin" }).eq("id", user.id);
-  await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "First Year", ...(isConfiguredAdmin ? { role: "admin" } : {}) }, { onConflict: "id", ignoreDuplicates: true });
+  await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "Second Year", ...(isConfiguredAdmin ? { role: "admin" } : {}) }, { onConflict: "id", ignoreDuplicates: true });
   return user.id;
 }
 
@@ -116,6 +116,61 @@ export async function getPersistentProgress(profileId: string) {
   return { profile, verifiedCompletions: verified.length, completionPercentage: Math.round((verified.length / 30) * 100), statuses: completions ?? [] };
 }
 
+async function getActiveChallengeDay() {
+  if (!db) return null;
+  const now = new Date().toISOString();
+  const { data: active, error: activeError } = await db.from("challenges").select("day").lte("published_at", now).gt("deadline_at", now).order("day", { ascending: true }).limit(1).maybeSingle();
+  if (activeError) throw activeError;
+  if (active) return active.day as number;
+  const { data: latest, error: latestError } = await db.from("challenges").select("day").lte("published_at", now).order("day", { ascending: false }).limit(1).maybeSingle();
+  if (latestError) throw latestError;
+  return (latest?.day as number | undefined) ?? null;
+}
+
+function summarizeStreakDays(days: number[], activeDay: number | null) {
+  const uniqueDays = [...new Set(days)].sort((left, right) => left - right);
+  let longest = 0;
+  let run = 0;
+  let previous: number | null = null;
+  for (const day of uniqueDays) {
+    run = previous !== null && day === previous + 1 ? run + 1 : 1;
+    longest = Math.max(longest, run);
+    previous = day;
+  }
+  const last = uniqueDays.length ? uniqueDays[uniqueDays.length - 1] : null;
+  // A streak stays alive while the next challenge is still in progress. If
+  // the student has already missed a closed day, the current run is broken.
+  const current = activeDay === null
+    ? run
+    : last !== null && (last === activeDay || last === activeDay - 1)
+      ? run
+      : 0;
+  return { current, longest };
+}
+
+export async function recalculateProfileStreak(profileId: string) {
+  if (!db) return null;
+  const [{ data: completions, error: completionError }, activeDay] = await Promise.all([
+    db.from("completions").select("challenge_id,awarded_points").eq("profile_id", profileId).eq("status", "verified").eq("awarded_points", 100),
+    getActiveChallengeDay(),
+  ]);
+  if (completionError) throw completionError;
+
+  const challengeIds = [...new Set((completions ?? []).map((completion) => completion.challenge_id as string))];
+  const dayByChallenge = new Map<string, number>();
+  if (challengeIds.length) {
+    const { data: challenges, error: challengeError } = await db.from("challenges").select("id,day").in("id", challengeIds);
+    if (challengeError) throw challengeError;
+    for (const challenge of challenges ?? []) dayByChallenge.set(challenge.id, challenge.day);
+  }
+
+  const days = (completions ?? []).map((completion) => dayByChallenge.get(completion.challenge_id)).filter((day): day is number => typeof day === "number");
+  const { current, longest } = summarizeStreakDays(days, activeDay);
+  const { error: updateError } = await db.from("profiles").update({ streak: current, longest_streak: longest }).eq("id", profileId);
+  if (updateError) throw updateError;
+  return { current, longest };
+}
+
 export async function getPersistentLeaderboard(query: string) {
   if (!db) return null;
   let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").order("points", { ascending: false }).order("streak", { ascending: false });
@@ -173,6 +228,21 @@ export async function getAdminUsers(query = "") {
   const solved = new Map<string, number>();
   for (const completion of completions ?? []) solved.set(completion.profile_id, (solved.get(completion.profile_id) ?? 0) + 1);
   return (data ?? []).map((profile) => ({ ...profile, solved: solved.get(profile.id) ?? 0 }));
+}
+
+export async function getAdminCompletions(limit = 500) {
+  if (!db) return [];
+  const { data, error } = await db.from("completions").select("id,profile_id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,created_at").order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  const profileIds = [...new Set((data ?? []).map((completion) => completion.profile_id as string))];
+  const challengeIds = [...new Set((data ?? []).map((completion) => completion.challenge_id as string))];
+  const [{ data: profiles }, { data: challenges }] = await Promise.all([
+    profileIds.length ? db.from("profiles").select("id,name,leetcode_username,academic_year").in("id", profileIds) : Promise.resolve({ data: [] }),
+    challengeIds.length ? db.from("challenges").select("id,day,title,slug").in("id", challengeIds) : Promise.resolve({ data: [] }),
+  ]);
+  const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  const challengeMap = new Map((challenges ?? []).map((challenge) => [challenge.id, challenge]));
+  return (data ?? []).map((completion) => ({ ...completion, profile: profileMap.get(completion.profile_id) ?? null, challenge: challengeMap.get(completion.challenge_id) ?? null }));
 }
 
 export async function getAdminVerificationJobs(limit = 100) {
@@ -297,6 +367,7 @@ export async function launchFirstChallenge(): Promise<LaunchResult> {
     const points = (verified ?? []).reduce((total, completion) => total + (completion.awarded_points ?? 0), 0);
     const { error: profileError } = await db.from("profiles").update({ points }).eq("id", profileId);
     if (profileError) throw profileError;
+    await recalculateProfileStreak(profileId).catch((error) => console.error("streak_recalculation_failed", profileId, error));
   }
 
   // Record the actual launch time. Checking this marker makes repeated
@@ -341,6 +412,7 @@ export async function manuallyVerifyPersistentCompletion(profileId: string, chal
   const awardedPoints = pointsForCompletion(submissionAt, challenge.deadlineAt);
   const { data, error } = await db.rpc("finalize_verified_completion", { p_job_id: job.id, p_profile_id: profileId, p_challenge_id: challengeId, p_submission_id: submissionId, p_submission_at: submissionAt, p_awarded_points: awardedPoints, p_evidence: { source: "admin_manual_verification", submissionId } });
   if (error) throw error;
+  if (data) await recalculateProfileStreak(profileId).catch((streakError) => console.error("streak_recalculation_failed", profileId, streakError));
   return { changed: Boolean(data), awardedPoints };
 }
 
@@ -408,5 +480,6 @@ export async function markPersistentVerified(job: ClaimedJob, submissionId: stri
     p_evidence: { source: "leetcode_recent_ac_submission", slug: challenge.slug },
   });
   if (error) throw error;
+  if (data) await recalculateProfileStreak(job.profile_id).catch((streakError) => console.error("streak_recalculation_failed", job.profile_id, streakError));
   return Boolean(data);
 }

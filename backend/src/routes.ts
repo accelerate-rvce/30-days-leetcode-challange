@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, getAdminAuditLogs, getAdminChallenges, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -155,8 +155,8 @@ router.get("/admin/metrics", async (req, res) => {
 router.get("/admin/overview", async (req, res) => {
   const adminId = await requireAdmin(req, res);
   if (!adminId) return;
-  const [metrics, challenges, users, jobs, logs] = await Promise.all([getPersistentAdminMetrics(), getAdminChallenges(), getAdminUsers(String(req.query.search ?? "")), getAdminVerificationJobs(), getAdminAuditLogs()]);
-  return res.json({ metrics, challenges, users, jobs, logs });
+  const [metrics, challenges, users, jobs, logs, completions] = await Promise.all([getPersistentAdminMetrics(), getAdminChallenges(), getAdminUsers(String(req.query.search ?? "")), getAdminVerificationJobs(), getAdminAuditLogs(), getAdminCompletions()]);
+  return res.json({ metrics, challenges, users, jobs, logs, completions });
 });
 
 router.post("/admin/challenges", async (req, res) => {
