@@ -447,7 +447,7 @@ function AdminDashboard({ api, token, metrics, challenges, users, jobs, logs, on
   const [selectedUser, setSelectedUser] = useState("");
   const [selectedChallenge, setSelectedChallenge] = useState("");
   const [submissionId, setSubmissionId] = useState("");
-  const [submissionAt, setSubmissionAt] = useState(new Date().toISOString().slice(0, 16));
+  const [submissionAt, setSubmissionAt] = useState(() => localDateTimeInput(new Date()));
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [showCreate, setShowCreate] = useState(false);
