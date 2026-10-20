@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
@@ -19,8 +19,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "30DAYS College | Challenge Command Center",
-  description: "A focused 30-day LeetCode challenge dashboard for college cohorts.",
+  title: "30DAYS | Accelerate · RVCE",
+  description: "Accelerate presents 30DAYS — a focused 30-day LeetCode challenge for RVCE students.",
+  applicationName: "Accelerate 30DAYS",
+};
+
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#04050a",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

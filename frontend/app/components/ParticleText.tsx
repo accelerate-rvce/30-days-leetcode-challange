@@ -31,8 +31,8 @@ export default function ParticleText({
   text,
   particleSize = 1.7,
   density = 4,
-  color = "#f3f5ef",
-  highlightColor = "#c6ff4d",
+  color = "#22d3ee",
+  highlightColor = "#a855f7",
   scatter = 150,
   gatherDuration = 1300,
   stagger = 300,
@@ -129,6 +129,9 @@ export default function ParticleText({
       context.clearRect(0, 0, width, height);
       context.shadowBlur = prefersReducedMotion ? 0 : particleSize * 2.6;
       context.shadowColor = highlightColor;
+      const brandGradient = context.createLinearGradient(0, 0, width, height);
+      brandGradient.addColorStop(0, color);
+      brandGradient.addColorStop(1, highlightColor);
       pointer.smoothX += (pointer.x - pointer.smoothX) * 0.18;
       pointer.smoothY += (pointer.y - pointer.smoothY) * 0.18;
       particles.forEach((particle) => {
@@ -139,7 +142,7 @@ export default function ParticleText({
         if (pointer.active && !prefersReducedMotion) { const dx = x - pointer.smoothX; const dy = y - pointer.smoothY; const distance = Math.hypot(dx, dy); if (distance > 0 && distance < repelRadius) { const force = Math.pow(1 - distance / repelRadius, 2) * pointerRepel; x += dx / distance * force; y += dy / distance * force; } }
         particle.x += (x - particle.x) * (prefersReducedMotion ? 1 : .22);
         particle.y += (y - particle.y) * (prefersReducedMotion ? 1 : .22);
-        context.fillStyle = particle.seed > .58 ? highlightColor : color;
+        context.fillStyle = brandGradient;
         context.globalAlpha = .4 + progress * .6;
         context.fillRect(particle.x - particle.size / 2, particle.y - particle.size / 2, particle.size, particle.size);
       });
