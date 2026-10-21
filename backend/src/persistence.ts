@@ -233,6 +233,7 @@ export async function getAdminUsers(query = "") {
 type AdminAnalyticsProfileRow = {
   id: string;
   name: string;
+  email: string | null;
   leetcode_username: string | null;
   academic_year: string;
   points: number | null;
@@ -288,7 +289,7 @@ async function selectAllAnalyticsRows<T>(table: "profiles" | "completions", colu
 export async function getAdminAnalytics() {
   if (!db) return null;
   const [profiles, completions] = await Promise.all([
-    selectAllAnalyticsRows<AdminAnalyticsProfileRow>("profiles", "id,name,leetcode_username,academic_year,points,streak,role,created_at", { column: "created_at", ascending: false }),
+    selectAllAnalyticsRows<AdminAnalyticsProfileRow>("profiles", "id,name,email,leetcode_username,academic_year,points,streak,role,created_at", { column: "created_at", ascending: false }),
     selectAllAnalyticsRows<AdminAnalyticsCompletionRow>("completions", "id,profile_id,status,attempted_at,verified_at,created_at,awarded_points", { column: "created_at", ascending: true }),
   ]);
 
@@ -391,6 +392,7 @@ export async function getAdminAnalytics() {
       return {
         id: profile.id,
         name: profile.name,
+        email: profile.email,
         leetcode_username: profile.leetcode_username,
         academic_year: profile.academic_year,
         points: profile.points ?? 0,
