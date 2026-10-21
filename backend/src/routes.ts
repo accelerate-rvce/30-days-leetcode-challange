@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -157,6 +157,16 @@ router.get("/admin/overview", async (req, res) => {
   if (!adminId) return;
   const [metrics, challenges, users, jobs, logs, completions] = await Promise.all([getPersistentAdminMetrics(), getAdminChallenges(), getAdminUsers(String(req.query.search ?? "")), getAdminVerificationJobs(), getAdminAuditLogs(), getAdminCompletions()]);
   return res.json({ metrics, challenges, users, jobs, logs, completions });
+});
+
+router.get("/admin/analytics", async (req, res) => {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  try {
+    return res.json(await getAdminAnalytics());
+  } catch {
+    return res.status(503).json({ error: "analytics_unavailable" });
+  }
 });
 
 router.post("/admin/challenges", async (req, res) => {

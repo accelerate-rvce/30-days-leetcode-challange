@@ -230,6 +230,211 @@ export async function getAdminUsers(query = "") {
   return (data ?? []).map((profile) => ({ ...profile, solved: solved.get(profile.id) ?? 0 }));
 }
 
+type AdminAnalyticsProfileRow = {
+  id: string;
+  name: string;
+  leetcode_username: string | null;
+  academic_year: string;
+  points: number | null;
+  streak: number | null;
+  role: string | null;
+  created_at: string;
+};
+
+type AdminAnalyticsCompletionRow = {
+  id: string;
+  profile_id: string;
+  status: string;
+  attempted_at: string | null;
+  verified_at: string | null;
+  created_at: string;
+  awarded_points: number | null;
+};
+
+const analyticsDateFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function analyticsDateKey(value: string | Date | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Map(analyticsDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
+}
+
+async function selectAllAnalyticsRows<T>(table: "profiles" | "completions", columns: string, order: { column: string; ascending: boolean }) {
+  if (!db) return [] as T[];
+  const pageSize = 1000;
+  const rows: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from(table)
+      .select(columns)
+      .order(order.column, { ascending: order.ascending })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    rows.push(...(data as T[]));
+    if (data.length < pageSize) break;
+  }
+  return rows;
+}
+
+export async function getAdminAnalytics() {
+  if (!db) return null;
+  const [profiles, completions] = await Promise.all([
+    selectAllAnalyticsRows<AdminAnalyticsProfileRow>("profiles", "id,name,leetcode_username,academic_year,points,streak,role,created_at", { column: "created_at", ascending: false }),
+    selectAllAnalyticsRows<AdminAnalyticsCompletionRow>("completions", "id,profile_id,status,attempted_at,verified_at,created_at,awarded_points", { column: "created_at", ascending: true }),
+  ]);
+
+  const participants = profiles.filter((profile) => profile.role !== "admin");
+  const participantIds = new Set(participants.map((profile) => profile.id));
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const participantCompletions = completions.filter((completion) => participantIds.has(completion.profile_id));
+
+  const daily = new Map<string, { registrations: number; activeUsers: Set<string>; attempts: number; verified: number; pointsAwarded: number }>();
+  const now = new Date();
+  for (let offset = 29; offset >= 0; offset -= 1) {
+    const key = analyticsDateKey(new Date(now.getTime() - offset * 86_400_000));
+    if (key) daily.set(key, { registrations: 0, activeUsers: new Set(), attempts: 0, verified: 0, pointsAwarded: 0 });
+  }
+
+  for (const profile of participants) {
+    const key = analyticsDateKey(profile.created_at);
+    const bucket = key ? daily.get(key) : undefined;
+    if (bucket) bucket.registrations += 1;
+  }
+
+  const completionStats = new Map<string, { solved: number; attempts: number; lastActivityAt: string | null }>();
+  for (const completion of completions) {
+    const stats = completionStats.get(completion.profile_id) ?? { solved: 0, attempts: 0, lastActivityAt: null };
+    stats.attempts += 1;
+    if (completion.status === "verified") stats.solved += 1;
+    const activityAt = completion.attempted_at ?? completion.created_at;
+    if (activityAt && (!stats.lastActivityAt || Date.parse(activityAt) > Date.parse(stats.lastActivityAt))) stats.lastActivityAt = activityAt;
+    completionStats.set(completion.profile_id, stats);
+
+    if (!participantIds.has(completion.profile_id)) continue;
+    const attemptKey = analyticsDateKey(completion.attempted_at ?? completion.created_at);
+    const attemptBucket = attemptKey ? daily.get(attemptKey) : undefined;
+    if (attemptBucket) {
+      attemptBucket.attempts += 1;
+      attemptBucket.activeUsers.add(completion.profile_id);
+    }
+    if (completion.status === "verified") {
+      const verifiedKey = analyticsDateKey(completion.verified_at ?? completion.created_at);
+      const verifiedBucket = verifiedKey ? daily.get(verifiedKey) : undefined;
+      if (verifiedBucket) {
+        verifiedBucket.verified += 1;
+        verifiedBucket.pointsAwarded += completion.awarded_points ?? 0;
+      }
+    }
+  }
+
+  const verifiedCompletions = participantCompletions.filter((completion) => completion.status === "verified");
+  const pointsAwarded = verifiedCompletions.reduce((total, completion) => total + (completion.awarded_points ?? 0), 0);
+  const totalPoints = participants.reduce((total, profile) => total + (profile.points ?? 0), 0);
+  const sortedPoints = participants.map((profile) => profile.points ?? 0).sort((left, right) => left - right);
+  const midline = Math.floor(sortedPoints.length / 2);
+  const medianPoints = sortedPoints.length === 0
+    ? 0
+    : sortedPoints.length % 2 === 0
+      ? Math.round((sortedPoints[midline - 1] + sortedPoints[midline]) / 2)
+      : sortedPoints[midline];
+  const activeChallengers = participants.filter((profile) => (completionStats.get(profile.id)?.solved ?? 0) > 0).length;
+  const withLeetcode = participants.filter((profile) => Boolean(profile.leetcode_username?.trim())).length;
+  const streaks = participants.map((profile) => profile.streak ?? 0);
+
+  const yearOrder = ["First Year", "Second Year", "Third Year", "Fourth Year"];
+  const yearMap = new Map<string, { registrations: number; verified: number; points: number }>();
+  for (const profile of participants) yearMap.set(profile.academic_year, { registrations: 0, verified: 0, points: 0 });
+  for (const profile of participants) {
+    const bucket = yearMap.get(profile.academic_year);
+    if (bucket) {
+      bucket.registrations += 1;
+      bucket.points += profile.points ?? 0;
+    }
+  }
+  for (const completion of verifiedCompletions) {
+    const profile = profileById.get(completion.profile_id);
+    if (!profile) continue;
+    const bucket = yearMap.get(profile.academic_year);
+    if (bucket) bucket.verified += 1;
+  }
+  const byAcademicYear = [...yearMap.entries()]
+    .sort(([left], [right]) => {
+      const leftIndex = yearOrder.indexOf(left);
+      const rightIndex = yearOrder.indexOf(right);
+      return (leftIndex === -1 ? yearOrder.length : leftIndex) - (rightIndex === -1 ? yearOrder.length : rightIndex);
+    })
+    .map(([academicYear, value]) => ({ academicYear, ...value }));
+
+  const statusOrder = ["pending", "verified", "not_verified", "delayed", "error"];
+  const statusMap = new Map<string, number>();
+  for (const completion of participantCompletions) statusMap.set(completion.status, (statusMap.get(completion.status) ?? 0) + 1);
+  const byStatus = [...statusMap.entries()]
+    .sort(([left], [right]) => {
+      const leftIndex = statusOrder.indexOf(left);
+      const rightIndex = statusOrder.indexOf(right);
+      return (leftIndex === -1 ? statusOrder.length : leftIndex) - (rightIndex === -1 ? statusOrder.length : rightIndex);
+    })
+    .map(([status, count]) => ({ status, count }));
+
+  const registrations = profiles
+    .map((profile) => {
+      const stats = completionStats.get(profile.id);
+      return {
+        id: profile.id,
+        name: profile.name,
+        leetcode_username: profile.leetcode_username,
+        academic_year: profile.academic_year,
+        points: profile.points ?? 0,
+        streak: profile.streak ?? 0,
+        role: profile.role === "admin" ? "admin" : "student",
+        created_at: profile.created_at,
+        solved: stats?.solved ?? 0,
+        attempts: stats?.attempts ?? 0,
+        last_activity_at: stats?.lastActivityAt ?? null,
+      };
+    })
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    totals: {
+      registrations: participants.length,
+      admins: profiles.length - participants.length,
+      activeChallengers,
+      zeroProgress: participants.length - activeChallengers,
+      verifiedCompletions: verifiedCompletions.length,
+      attempts: participantCompletions.length,
+      pointsAwarded,
+      averagePoints: participants.length ? Math.round(totalPoints / participants.length) : 0,
+      medianPoints,
+      averageStreak: participants.length ? Math.round(streaks.reduce((total, streak) => total + streak, 0) / participants.length) : 0,
+      longestStreak: streaks.length ? Math.max(...streaks) : 0,
+      withLeetcode,
+      withoutLeetcode: participants.length - withLeetcode,
+    },
+    byAcademicYear,
+    byStatus,
+    daily: [...daily.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, value]) => ({
+      date,
+      registrations: value.registrations,
+      activeUsers: value.activeUsers.size,
+      attempts: value.attempts,
+      verified: value.verified,
+      pointsAwarded: value.pointsAwarded,
+    })),
+    registrations,
+  };
+}
+
 export async function getAdminCompletions(limit = 500) {
   if (!db) return [];
   const { data, error } = await db.from("completions").select("id,profile_id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,created_at").order("created_at", { ascending: false }).limit(limit);
