@@ -51,6 +51,14 @@ export async function getPersistentProfile(profileId: string) {
   return data;
 }
 
+export async function getLeetCodeUsernameOwner(handle: string, profileId: string) {
+  if (!db) return null;
+  const { data, error } = await db.from("profiles").select("id,name,leetcode_username").not("leetcode_username", "is", null).limit(5_000);
+  if (error) throw error;
+  const normalized = handle.trim().toLowerCase();
+  return (data ?? []).find((profile) => profile.id !== profileId && profile.leetcode_username?.trim().toLowerCase() === normalized) ?? null;
+}
+
 export async function updatePersistentProfile(profileId: string, updates: { name?: string; leetcode_username?: string; academic_year?: string }) {
   if (!db) return null;
   const { data, error } = await db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").single();

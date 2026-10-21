@@ -395,11 +395,14 @@ export default function ChallengeApp() {
     if (!token || savingProfile) return;
     setSavingProfile(true); setError("");
     try {
-      const normalizedHandle = leetcodeHandle.trim().replace(/[\])}>]+$/, "").replace(/^@+/, "").replace(/^https?:\/\/(www\.)?leetcode\.com\/u\/([^/?#]+)\/?(?:[?#].*)?$/i, "$2");
-      const response = await fetch(`${api}/api/profile`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: waitlistName.trim(), academic_year: academicYear, leetcode_username: normalizedHandle }) });
+      const response = await fetch(`${api}/api/profile`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: waitlistName.trim(), academic_year: academicYear, leetcode_username: leetcodeHandle.trim() }) });
       if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; throw new Error(body.error ?? "profile_update_failed"); }
-      setLeetcodeHandle(normalizedHandle);
-      setProgress((current) => current ? { ...current, profile: { ...current.profile, name: waitlistName.trim(), academic_year: academicYear, leetcode_username: normalizedHandle } } : current);
+      const body = await response.json() as { profile?: { name?: string; academic_year?: string; leetcode_username?: string | null } };
+      const savedHandle = body.profile?.leetcode_username ?? leetcodeHandle.trim();
+      const savedName = body.profile?.name ?? waitlistName.trim();
+      const savedYear = body.profile?.academic_year ?? academicYear;
+      setLeetcodeHandle(savedHandle);
+      setProgress((current) => current ? { ...current, profile: { ...current.profile, name: savedName, academic_year: savedYear, leetcode_username: savedHandle } } : current);
       setOnboardingStage("ready");
       // Registration is complete, but do not trust a possibly stale gate.
       // Re-read the launch setting before rendering either the dashboard or
@@ -415,7 +418,15 @@ export default function ChallengeApp() {
           setSettingsError("Your registration was saved, but we couldn’t confirm the launch status. Check your connection and try again.");
         }
       }
-    } catch { setError("We couldn’t save your LeetCode username. Please check it and try again."); }
+    } catch (saveError) {
+      const code = saveError instanceof Error ? saveError.message : "";
+      setError(code === "leetcode_username_not_found" ? "We couldn’t find that LeetCode account. Check the username and try again."
+        : code === "leetcode_check_unavailable" ? "LeetCode isn’t responding right now. Please try again in a minute."
+        : code === "leetcode_username_required" ? "A LeetCode account is required to register."
+        : code === "leetcode_username_taken" ? "That LeetCode account is already linked to another registration. Contact support if this is yours."
+        : code === "invalid_leetcode_username" || code === "invalid_profile" ? "Enter a valid LeetCode username or profile URL."
+        : "We couldn’t save your LeetCode username. Please check it and try again.");
+    }
     finally { setSavingProfile(false); }
   }
 
@@ -534,4 +545,4 @@ function ComingSoon({ name, handle, academicYear, email, message, launchAt, onEd
     </main>
   );
 }
-function WaitlistDetails({ name, setName, handle, setHandle, academicYear, setAcademicYear, saving, onSave, onCancel, error, notice = "" }: { name: string; setName: (value: string) => void; handle: string; setHandle: (value: string) => void; academicYear: string; setAcademicYear: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void; onCancel?: () => void; error: string; notice?: string }) { return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">{onCancel ? "YOUR REGISTRATION" : "JOIN THE SPRINT"}</p><h1>{onCancel ? "Keep your details current." : "Tell us where you are starting."}</h1><p className="onboarding-copy">These details connect your verified work to your challenge record.</p>{notice && <p className="onboarding-copy" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}<form className="onboarding-form" onSubmit={onSave}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label><label>LeetCode username or profile URL<input value={handle} onChange={(event) => setHandle(event.target.value)} autoComplete="url" placeholder="https://leetcode.com/u/username" required /></label><label>Academic year<select value={academicYear} onChange={(event) => setAcademicYear(event.target.value)} required><option>Second Year</option><option>Third Year</option><option>Fourth Year</option></select></label><button className="primary-button onboarding-action" type="submit" disabled={saving}>{saving ? "Saving…" : onCancel ? "Save changes" : "Join the sprint"} <span>→</span></button>{onCancel && <button className="secondary-button waitlist-cancel" type="button" onClick={onCancel}>Back to waitlist status</button>}</form><a className="whatsapp-link" href={whatsappGroupUrl} target="_blank" rel="noreferrer">Join the cohort WhatsApp group <span>↗</span></a></div></section></main>; }
+function WaitlistDetails({ name, setName, handle, setHandle, academicYear, setAcademicYear, saving, onSave, onCancel, error, notice = "" }: { name: string; setName: (value: string) => void; handle: string; setHandle: (value: string) => void; academicYear: string; setAcademicYear: (value: string) => void; saving: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void; onCancel?: () => void; error: string; notice?: string }) { return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">{onCancel ? "YOUR REGISTRATION" : "JOIN THE SPRINT"}</p><h1>{onCancel ? "Keep your details current." : "Tell us where you are starting."}</h1><p className="onboarding-copy">These details connect your verified work to your challenge record.</p>{notice && <p className="onboarding-copy" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}<form className="onboarding-form" onSubmit={onSave}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label><label>LeetCode username or profile URL<input value={handle} onChange={(event) => setHandle(event.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="e.g. johndoe or https://leetcode.com/u/johndoe/" required /></label><label>Academic year<select value={academicYear} onChange={(event) => setAcademicYear(event.target.value)} required><option>Second Year</option><option>Third Year</option><option>Fourth Year</option></select></label><button className="primary-button onboarding-action" type="submit" disabled={saving}>{saving ? "Saving…" : onCancel ? "Save changes" : "Join the sprint"} <span>→</span></button>{onCancel && <button className="secondary-button waitlist-cancel" type="button" onClick={onCancel}>Back to waitlist status</button>}</form><a className="whatsapp-link" href={whatsappGroupUrl} target="_blank" rel="noreferrer">Join the cohort WhatsApp group <span>↗</span></a></div></section></main>; }
