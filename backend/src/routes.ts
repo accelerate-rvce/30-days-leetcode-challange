@@ -34,7 +34,7 @@ export function normalizeLeetCodeUsername(value: string) {
       if (segments.length === 1 && !reservedLeetcodePaths.has(segments[0].toLowerCase())) return segments[0];
     }
   } catch { /* raw username */ }
-  return input;
+  return input.replace(/\/+$/, "");
 }
 
 // Waitlist gate: when enabled, only admins may see challenges, attempt
