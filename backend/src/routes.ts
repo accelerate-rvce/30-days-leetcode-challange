@@ -15,16 +15,26 @@ async function requireAdmin(req: Request, res: Response) {
   if (!adminId) { res.status(403).json({ error: "admin_access_required" }); return null; }
   return adminId;
 }
-function normalizeLeetCodeUsername(value: string) {
-  const input = value.trim().replace(/[\])}>]+$/, "");
+const leetcodeUsernamePattern = /^[A-Za-z0-9._-]+$/;
+const reservedLeetcodePaths = new Set(["accounts", "assessment", "contest", "discuss", "explore", "interview", "premium", "problems", "profile", "store", "studyplan", "submissions", "u"]);
+
+// Accept both a bare LeetCode username (including dots, e.g. "a.b") and a
+// pasted profile URL. URLs may omit the scheme and may use either the /u/
+// form or the older single-segment form.
+export function normalizeLeetCodeUsername(value: string) {
+  let input = value.trim().replace(/^@+/, "").replace(/[\])}>]+$/, "");
+  if (!input) return "";
+  if (/^(?:www\.)?leetcode\.com(?:\/|$)/i.test(input)) input = `https://${input}`;
   try {
     const parsed = new URL(input);
-    if (parsed.hostname === "leetcode.com" || parsed.hostname === "www.leetcode.com") {
-      const match = parsed.pathname.match(/^\/u\/([^/]+)\/?$/i);
-      if (match) return decodeURIComponent(match[1]);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (hostname === "leetcode.com") {
+      const segments = parsed.pathname.split("/").filter(Boolean).map((segment) => decodeURIComponent(segment));
+      if (segments[0]?.toLowerCase() === "u" && segments[1]) return segments[1];
+      if (segments.length === 1 && !reservedLeetcodePaths.has(segments[0].toLowerCase())) return segments[0];
     }
   } catch { /* raw username */ }
-  return input.replace(/^@+/, "");
+  return input;
 }
 
 // Waitlist gate: when enabled, only admins may see challenges, attempt
@@ -124,8 +134,9 @@ router.get("/profile", async (req, res) => {
 router.patch("/profile", async (req, res) => {
   const parsed = z.object({ name: z.string().trim().min(1).max(120).optional(), leetcode_username: z.string().trim().min(1).max(300).optional(), academic_year: z.enum(["First Year", "Second Year", "Third Year", "Fourth Year"]).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_profile" });
-  const updates = { ...parsed.data, ...(parsed.data.leetcode_username ? { leetcode_username: normalizeLeetCodeUsername(parsed.data.leetcode_username) } : {}) };
-  if (updates.leetcode_username && !/^[A-Za-z0-9_-]+$/.test(updates.leetcode_username)) return res.status(400).json({ error: "invalid_leetcode_username" });
+  const normalizedHandle = parsed.data.leetcode_username ? normalizeLeetCodeUsername(parsed.data.leetcode_username) : undefined;
+  if (normalizedHandle !== undefined && (normalizedHandle.length > 80 || !leetcodeUsernamePattern.test(normalizedHandle))) return res.status(400).json({ error: "invalid_leetcode_username" });
+  const updates = { ...parsed.data, ...(normalizedHandle !== undefined ? { leetcode_username: normalizedHandle } : {}) };
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
   if (!profileId) return res.status(401).json({ error: "authentication_required" });
