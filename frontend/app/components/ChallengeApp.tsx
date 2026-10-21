@@ -418,7 +418,14 @@ export default function ChallengeApp() {
           setSettingsError("Your registration was saved, but we couldn’t confirm the launch status. Check your connection and try again.");
         }
       }
-    } catch { setError("We couldn’t save your LeetCode username. Please check it and try again."); }
+    } catch (saveError) {
+      const code = saveError instanceof Error ? saveError.message : "";
+      setError(code === "leetcode_username_not_found" ? "We couldn’t find that LeetCode account. Check the username and try again."
+        : code === "leetcode_check_unavailable" ? "LeetCode isn’t responding right now. Please try again in a minute."
+        : code === "leetcode_username_required" ? "A LeetCode account is required to register."
+        : code === "invalid_leetcode_username" || code === "invalid_profile" ? "Enter a valid LeetCode username or profile URL."
+        : "We couldn’t save your LeetCode username. Please check it and try again.");
+    }
     finally { setSavingProfile(false); }
   }
 

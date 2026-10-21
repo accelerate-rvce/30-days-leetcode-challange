@@ -2,7 +2,7 @@ import { Request, Response, Router } from "express";
 import { z } from "zod";
 import { adminIdFromAccessToken, createAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
-import { leetcodeRateLimitRemainingMs } from "./leetcode.js";
+import { checkLeetCodeUser, leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
 const router = Router();
 const authToken = (value?: string) => value?.replace(/^Bearer\s+/i, "");
@@ -140,6 +140,15 @@ router.patch("/profile", async (req, res) => {
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
   if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  const currentProfile = await getPersistentProfile(profileId);
+  const currentHandle = currentProfile?.leetcode_username?.trim() ?? "";
+  if (!currentHandle && normalizedHandle === undefined && currentProfile?.role !== "admin") return res.status(400).json({ error: "leetcode_username_required" });
+  if (normalizedHandle !== undefined && normalizedHandle !== currentHandle) {
+    const check = await checkLeetCodeUser(normalizedHandle);
+    if (check.kind === "not_found") return res.status(400).json({ error: "leetcode_username_not_found" });
+    if (check.kind === "unavailable") return res.status(503).json({ error: "leetcode_check_unavailable" });
+    if (check.username) updates.leetcode_username = check.username;
+  }
   return res.json({ profile: await updatePersistentProfile(profileId, updates) });
 });
 
