@@ -191,6 +191,55 @@ export async function fetchRecentAcceptedSubmissions(handle: string): Promise<Fe
   return batch.get(handle.trim()) ?? { kind: "unavailable", submissions: [], reason: "missing_handle" };
 }
 
+export type LeetCodeUserCheck = { kind: "exists" | "not_found" | "unavailable"; username?: string; reason?: string };
+const userCheckCache = new Map<string, { result: LeetCodeUserCheck; expiresAt: number }>();
+const USER_CHECK_POSITIVE_TTL_MS = 24 * 60 * 60_000;
+const USER_CHECK_NEGATIVE_TTL_MS = 10 * 60_000;
+const USER_CHECK_UNAVAILABLE_TTL_MS = 60_000;
+
+// Registration calls this once for a new or changed handle. Successful checks
+// are cached for a day and failures for ten minutes, so editing a name or year
+// never causes another LeetCode request.
+export async function checkLeetCodeUser(handle: string): Promise<LeetCodeUserCheck> {
+  const username = handle.trim();
+  if (!username) return { kind: "not_found", reason: "missing_handle" };
+  const now = Date.now();
+  const cached = userCheckCache.get(username);
+  if (cached && cached.expiresAt > now) return cached.result;
+  if (cached) userCheckCache.delete(username);
+
+  const response = await graphqlRequest({
+    query: "query userExists($username: String!) { matchedUser(username: $username) { username } }",
+    variables: { username },
+  });
+
+  let result: LeetCodeUserCheck;
+  if (!response.ok) {
+    result = { kind: "unavailable", reason: response.reason ?? "leetcode_unavailable" };
+  } else {
+    const data = response.body?.data as { matchedUser?: { username?: unknown } | null } | undefined;
+    const matched = data?.matchedUser;
+    if (typeof matched?.username === "string" && matched.username) {
+      result = { kind: "exists", username: matched.username };
+    } else {
+      const reason = describeErrors(response.body?.errors);
+      // Only an explicit "does not exist" is a real not-found result. Any
+      // other GraphQL error is treated as unavailable so registration can
+      // continue without LeetCode's existence check.
+      result = !reason || /does not exist|not found|user_not_found/i.test(reason)
+        ? { kind: "not_found", reason: reason ?? "user_not_found" }
+        : { kind: "unavailable", reason };
+    }
+  }
+
+  const ttl = result.kind === "exists" ? USER_CHECK_POSITIVE_TTL_MS : result.kind === "not_found" ? USER_CHECK_NEGATIVE_TTL_MS : USER_CHECK_UNAVAILABLE_TTL_MS;
+  userCheckCache.set(username, { result, expiresAt: now + ttl });
+  if (userCheckCache.size > 5_000) {
+    for (const [key, value] of userCheckCache) if (value.expiresAt <= now) userCheckCache.delete(key);
+  }
+  return result;
+}
+
 export async function fetchRecentAccepted(handle: string, challenge: Challenge): Promise<{ kind: "verified" | "not_found" | "unavailable"; submission?: Submission; reason?: string }> {
   const result = await fetchRecentAcceptedSubmissions(handle);
   if (result.kind === "unavailable") return { kind: "unavailable", reason: result.reason };
