@@ -633,6 +633,10 @@ export async function manuallyVerifyPersistentCompletion(profileId: string, chal
 
 export async function enqueuePersistentVerification(profileId: string, challengeId: string) {
   if (!db) return;
+  // An explicit retry should get the full not-found retry budget again. The
+  // SQL enqueue function preserves attempts, so reset it before re-queueing.
+  const { error: resetError } = await db.from("verification_jobs").update({ attempts: 0 }).eq("profile_id", profileId).eq("challenge_id", challengeId);
+  if (resetError) throw resetError;
   const { error } = await db.rpc("enqueue_verification_job", { p_profile_id: profileId, p_challenge_id: challengeId });
   if (error) throw error;
 }
