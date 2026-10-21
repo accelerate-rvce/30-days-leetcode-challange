@@ -223,9 +223,12 @@ export async function checkLeetCodeUser(handle: string): Promise<LeetCodeUserChe
       result = { kind: "exists", username: matched.username };
     } else {
       const reason = describeErrors(response.body?.errors);
-      result = reason && /rate limit|too many|forbidden|temporarily/i.test(reason)
-        ? { kind: "unavailable", reason }
-        : { kind: "not_found", reason: reason ?? "user_not_found" };
+      // Only an explicit "does not exist" is a real not-found result. Any
+      // other GraphQL error is treated as unavailable so registration can
+      // continue without LeetCode's existence check.
+      result = !reason || /does not exist|not found|user_not_found/i.test(reason)
+        ? { kind: "not_found", reason: reason ?? "user_not_found" }
+        : { kind: "unavailable", reason };
     }
   }
 

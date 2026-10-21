@@ -146,7 +146,9 @@ router.patch("/profile", async (req, res) => {
   if (normalizedHandle !== undefined && normalizedHandle !== currentHandle) {
     const check = await checkLeetCodeUser(normalizedHandle);
     if (check.kind === "not_found") return res.status(400).json({ error: "leetcode_username_not_found" });
-    if (check.kind === "unavailable") return res.status(503).json({ error: "leetcode_check_unavailable" });
+    // If LeetCode is unavailable or rate-limiting us, save the normalized
+    // handle without the existence check. The verification worker will use it
+    // later once submissions start arriving.
     if (check.username) updates.leetcode_username = check.username;
     const owner = await getLeetCodeUsernameOwner(updates.leetcode_username ?? normalizedHandle, profileId);
     if (owner) return res.status(409).json({ error: "leetcode_username_taken" });
