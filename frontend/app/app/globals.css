@@ -391,3 +391,51 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
   .pagination { align-items: flex-start; flex-direction: column; }
   .admin-completion-summary .text-button { margin-left: 0; }
 }
+
+.admin-analytics-panel { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.admin-analytics-heading { align-items: flex-start; }
+.admin-analytics-heading p { margin: 8px 0 0; max-width: 760px; }
+.admin-analytics-actions { align-items: flex-end; display: flex; flex-direction: column; gap: 10px; }
+.admin-analytics-actions .secondary-button { margin-top: 0; white-space: nowrap; }
+.admin-page .admin-analytics-metrics { grid-template-columns: repeat(4, 1fr); margin-bottom: 0; }
+.analytics-chart { align-items: stretch; background: var(--background); border: 1px solid var(--line); display: flex; gap: 5px; height: 184px; margin-top: 22px; overflow-x: auto; padding: 14px 12px 8px; }
+.analytics-day { display: flex; flex: 1 0 22px; flex-direction: column; gap: 6px; justify-content: flex-end; min-width: 22px; }
+.analytics-bars { align-items: flex-end; display: flex; gap: 2px; height: 132px; justify-content: center; }
+.analytics-bar { border-radius: 2px 2px 0 0; display: block; width: 5px; }
+.analytics-bar.registration, .analytics-dot.registration { background: #a78bfa; }
+.analytics-bar.active, .analytics-dot.active { background: var(--accent); }
+.analytics-bar.verified, .analytics-dot.verified { background: #4ade80; }
+.analytics-day small { color: var(--muted); font-family: var(--font-geist-mono); font-size: 8px; min-height: 10px; text-align: center; white-space: nowrap; }
+.analytics-legend { align-items: center; color: var(--muted); display: flex; flex-wrap: wrap; font-family: var(--font-geist-mono); font-size: 9px; gap: 18px; margin-top: 12px; }
+.analytics-legend span { align-items: center; display: flex; gap: 6px; }
+.analytics-dot { border-radius: 50%; display: inline-block; height: 6px; width: 6px; }
+.admin-analytics-split { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+.analytics-breakdown-table { border-collapse: collapse; margin-top: 18px; width: 100%; }
+.analytics-breakdown-table th { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; font-weight: 500; padding: 0 10px 11px; text-align: left; }
+.analytics-breakdown-table td { border-top: 1px solid var(--line); color: var(--soft); font-family: var(--font-geist-mono); font-size: 11px; padding: 11px 10px; }
+.analytics-daily-table { min-width: 620px; }
+.analytics-status-list { display: flex; flex-direction: column; margin-top: 14px; }
+.analytics-status-list > div { align-items: center; border-top: 1px solid var(--line); display: flex; justify-content: space-between; padding: 10px 0; }
+.analytics-status-list strong { color: var(--foreground); font-family: var(--font-geist-mono); font-size: 14px; font-weight: 500; }
+.admin-registration-filters { grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(140px, .7fr)); }
+.ranking-panel .admin-registration-table { min-width: 1120px; }
+.admin-analytics-footnote { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; margin: 2px 0 0; }
+@media (max-width: 940px) {
+  .admin-page .admin-analytics-metrics { grid-template-columns: repeat(2, 1fr); }
+  .admin-analytics-split { grid-template-columns: 1fr; }
+  .admin-registration-filters { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 680px) {
+  .admin-analytics-heading { flex-direction: column; }
+  .admin-analytics-actions { align-items: flex-start; }
+  .admin-page .admin-analytics-metrics { grid-template-columns: 1fr; }
+  .admin-registration-filters { grid-template-columns: 1fr; }
+  .analytics-chart { height: 164px; }
+  .analytics-bars { height: 112px; }
+  .admin-analytics-footnote { line-height: 1.6; }
+}
+
+.whatsapp-link { align-items: center; background: rgba(37, 211, 102, .07); border: 1px solid rgba(37, 211, 102, .3); color: #4ade80; display: inline-flex; font-family: var(--font-geist-mono); font-size: 10px; gap: 8px; margin-top: 18px; padding: 11px 14px; text-decoration: none; transition: background 180ms ease, border-color 180ms ease, transform 140ms ease-out; }
+.whatsapp-link:hover { background: rgba(37, 211, 102, .12); border-color: rgba(37, 211, 102, .55); color: #86efac; }
+.whatsapp-link:active { transform: scale(.98); }
+.whatsapp-link span { font-size: 14px; line-height: 1; }
