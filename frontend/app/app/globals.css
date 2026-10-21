@@ -434,3 +434,8 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
   .analytics-bars { height: 112px; }
   .admin-analytics-footnote { line-height: 1.6; }
 }
+
+.whatsapp-link { align-items: center; background: rgba(37, 211, 102, .07); border: 1px solid rgba(37, 211, 102, .3); color: #4ade80; display: inline-flex; font-family: var(--font-geist-mono); font-size: 10px; gap: 8px; margin-top: 18px; padding: 11px 14px; text-decoration: none; transition: background 180ms ease, border-color 180ms ease, transform 140ms ease-out; }
+.whatsapp-link:hover { background: rgba(37, 211, 102, .12); border-color: rgba(37, 211, 102, .55); color: #86efac; }
+.whatsapp-link:active { transform: scale(.98); }
+.whatsapp-link span { font-size: 14px; line-height: 1; }
