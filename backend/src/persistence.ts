@@ -30,9 +30,14 @@ export async function userIdFromAccessToken(token?: string) {
   // The browser check is UX; enforce the college domain at the API boundary
   // too so a token from another Google account cannot read or write data.
   if (!isConfiguredAdmin && !email?.endsWith("@rvce.edu.in")) return null;
-  const { data: existingProfile } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (isConfiguredAdmin && existingProfile && existingProfile.role !== "admin") await db.from("profiles").update({ role: "admin" }).eq("id", user.id);
-  await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "Second Year", ...(isConfiguredAdmin ? { role: "admin" } : {}) }, { onConflict: "id", ignoreDuplicates: true });
+  // Students are only persisted after they submit a LeetCode handle. Creating
+  // a placeholder profile here would leave a permanent NULL-handle row just
+  // from signing in. Admins still need a profile row for the admin panel.
+  if (isConfiguredAdmin) {
+    const { data: existingProfile } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    if (existingProfile && existingProfile.role !== "admin") await db.from("profiles").update({ role: "admin" }).eq("id", user.id);
+    await db.from("profiles").upsert({ id: user.id, name: user.user_metadata?.full_name ?? user.email ?? "RVCE student", academic_year: user.user_metadata?.academic_year ?? "Second Year", role: "admin" }, { onConflict: "id", ignoreDuplicates: true });
+  }
   return user.id;
 }
 
@@ -46,7 +51,7 @@ export async function adminIdFromAccessToken(token?: string) {
 
 export async function getPersistentProfile(profileId: string) {
   if (!db) return null;
-  const { data, error } = await db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").eq("id", profileId).single();
+  const { data, error } = await db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").eq("id", profileId).maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -115,11 +120,20 @@ export async function getPersistentChallenges() {
 export async function getPersistentProgress(profileId: string) {
   if (!db) return null;
   const [{ data: profile, error: profileError }, { data: completions, error: completionError }] = await Promise.all([
-    db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").eq("id", profileId).single(),
+    db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").eq("id", profileId).maybeSingle(),
     db.from("completions").select("id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,evidence").eq("profile_id", profileId).order("attempted_at", { ascending: false }),
   ]);
   if (profileError) throw profileError;
   if (completionError) throw completionError;
+  if (!profile) {
+    // A new student has authenticated but has not submitted a LeetCode handle
+    // yet. Return a transient profile so the registration form can render
+    // without writing a NULL handle to the database.
+    const { data: authUser } = await db.auth.admin.getUserById(profileId);
+    const user = authUser?.user;
+    const name = user?.user_metadata?.full_name ?? user?.email ?? "RVCE student";
+    return { profile: { id: profileId, name, leetcode_username: null, academic_year: "Second Year", points: 0, streak: 0, role: "student" }, verifiedCompletions: 0, completionPercentage: 0, statuses: [] };
+  }
   const verified = (completions ?? []).filter((item) => item.status === "verified");
   return { profile, verifiedCompletions: verified.length, completionPercentage: Math.round((verified.length / 30) * 100), statuses: completions ?? [] };
 }
