@@ -16,4 +16,5 @@ export type AdminAnalyticsTotals = { registrations: number; admins: number; acti
 export type AdminAnalytics = { generatedAt: string; totals: AdminAnalyticsTotals; byAcademicYear: AdminAnalyticsYear[]; byStatus: AdminAnalyticsStatus[]; daily: AdminAnalyticsDay[]; registrations: AdminAnalyticsRegistration[] };
 export type SiteSettings = { waitlistEnabled: boolean; message: string; launchAt: string | null; sprintStartedAt?: string | null };
 export type LaunchResult = { started: boolean; reason?: string; challengeId?: string; day?: number; publishedAt?: string; deadlineAt?: string; updatedCompletions?: number; updatedProfiles?: number };
+export type CohortResetResult = { reset: boolean; startedAt: string; deadlineAt: string; day: number; challengeId: string; completionsDeleted: number; jobsDeleted: number; alertsDeleted: number; profilesReset: number; challengesShifted: number };
 export type SettingsResponse = SiteSettings & { launch?: LaunchResult | null };

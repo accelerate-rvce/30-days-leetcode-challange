@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { checkLeetCodeUser, leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -353,6 +353,35 @@ router.patch("/admin/settings", async (req, res) => {
   } catch (error) {
     await writeAdminAuditLog(adminId, { action: "update_settings", status: "error", message: error instanceof Error ? error.message : "settings_update_failed" });
     return res.status(400).json({ error: "settings_update_failed_apply_migration_005" });
+  }
+});
+
+router.post("/admin/cohort/reset", async (req, res) => {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  const parsed = z.object({ confirmation: z.literal("START DAY 1") }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "confirmation_required" });
+  try {
+    const result = await resetCohort();
+    await writeAdminAuditLog(adminId, {
+      action: "reset_cohort",
+      status: "success",
+      message: `Cohort reset; Day 1 is live until ${result.deadlineAt}`,
+      targetChallengeId: result.challengeId,
+      metadata: result,
+    }).catch((error) => console.error("reset_cohort_audit_failed", error));
+    return res.json({ reset: true, ...result });
+  } catch (error) {
+    const message = typeof error === "object" && error !== null && "message" in error
+      ? String((error as { message: unknown }).message)
+      : error instanceof Error ? error.message : "cohort_reset_failed";
+    const code = message === "day_one_missing"
+      ? "day_one_missing"
+      : /reset_cohort/i.test(message) && /(does not exist|not find|schema cache)/i.test(message)
+        ? "reset_cohort_migration_required"
+        : "cohort_reset_failed";
+    await writeAdminAuditLog(adminId, { action: "reset_cohort", status: "error", message, metadata: { code } }).catch(() => {});
+    return res.status(code === "day_one_missing" ? 400 : 500).json({ error: code });
   }
 });
 

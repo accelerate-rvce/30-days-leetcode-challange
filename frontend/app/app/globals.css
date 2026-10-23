@@ -446,3 +446,16 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
 .whatsapp-link:hover { background: rgba(37, 211, 102, .12); border-color: rgba(37, 211, 102, .55); color: #86efac; }
 .whatsapp-link:active { transform: scale(.98); }
 .whatsapp-link span { font-size: 14px; line-height: 1; }
+
+.cohort-reset-panel { border-color: rgba(240, 120, 120, .32); margin-top: 10px; }
+.cohort-reset-panel .empty-copy { max-width: 760px; }
+.cohort-reset-tag { border-color: rgba(240, 120, 120, .35); color: #fda4af; }
+.cohort-reset-form { grid-template-columns: minmax(220px, 360px); }
+.cohort-reset-form input { letter-spacing: .08em; }
+.danger-button { align-items: center; background: #fda4af; border: 0; color: #2a0b0f; display: inline-flex; font-family: var(--font-geist-mono); font-size: 11px; font-weight: 700; justify-content: center; padding: 11px 15px; transition: background 180ms ease, transform 140ms ease-out; }
+.danger-button:hover { background: #fecdd3; }
+.danger-button:active { transform: scale(.97); }
+.danger-button:disabled { cursor: not-allowed; opacity: .4; }
+.cohort-reset-status { font-family: var(--font-geist-mono); font-size: 11px; line-height: 1.6; margin: 14px 0 0; }
+.cohort-reset-status.success { color: var(--accent); }
+.cohort-reset-status.error { color: #fda4af; }

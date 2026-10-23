@@ -524,6 +524,18 @@ export type SiteSettings = { waitlistEnabled: boolean; message: string; launchAt
 
 export type LaunchResult = { started: boolean; reason?: string; challengeId?: string; day?: number; publishedAt?: string; deadlineAt?: string; updatedCompletions?: number; updatedProfiles?: number };
 
+export type CohortResetResult = {
+  startedAt: string;
+  deadlineAt: string;
+  day: number;
+  challengeId: string;
+  completionsDeleted: number;
+  jobsDeleted: number;
+  alertsDeleted: number;
+  profilesReset: number;
+  challengesShifted: number;
+};
+
 export async function getSiteSettings(): Promise<SiteSettings> {
   const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null, sprintStartedAt: null };
   if (!db) return defaults;
@@ -608,6 +620,13 @@ export async function launchFirstChallenge(): Promise<LaunchResult> {
   if (markerError) throw markerError;
 
   return { started: true, challengeId: challenge.id, day: challenge.day, publishedAt, deadlineAt, updatedCompletions, updatedProfiles: profileIds.length };
+}
+
+export async function resetCohort(): Promise<CohortResetResult> {
+  if (!db) throw new Error("persistence_not_configured");
+  const { data, error } = await db.rpc("reset_cohort");
+  if (error) throw error;
+  return data as CohortResetResult;
 }
 
 export async function updateAdminChallenge(challengeId: string, updates: { title?: string; slug?: string; difficulty?: string; topic?: string; points?: number; published_at?: string; deadline_at?: string }) {
