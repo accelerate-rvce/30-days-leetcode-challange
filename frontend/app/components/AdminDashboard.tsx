@@ -35,6 +35,8 @@ function CohortResetPanel({ api, token, onReset }: { api: string; token: string;
       });
       const body = await response.json().catch(() => ({})) as CohortResetResult & { error?: string };
       if (!response.ok) {
+        if (response.status === 404) throw new Error("The backend hasn’t been deployed with cohort reset yet. Deploy the latest backend, then try again.");
+        if (response.status === 401 || response.status === 403) throw new Error("Your admin session has expired. Sign in again, then retry.");
         if (body.error === "reset_cohort_migration_required") throw new Error("Apply migration 009_reset_cohort.sql in Supabase, then try again.");
         if (body.error === "day_one_missing") throw new Error("Add a Day 1 question before starting a new cohort.");
         if (body.error === "confirmation_required") throw new Error("Type START DAY 1 exactly to confirm.");
