@@ -459,3 +459,6 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
 .cohort-reset-status { font-family: var(--font-geist-mono); font-size: 11px; line-height: 1.6; margin: 14px 0 0; }
 .cohort-reset-status.success { color: var(--accent); }
 .cohort-reset-status.error { color: #fda4af; }
+.text-button.danger-text { color: #fda4af; }
+.text-button.danger-text:hover { color: #fecdd3; }
+.text-button:disabled { cursor: not-allowed; opacity: .45; }

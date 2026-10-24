@@ -534,6 +534,7 @@ export type CohortResetResult = {
   alertsDeleted: number;
   profilesReset: number;
   challengesShifted: number;
+  challengesKept?: number;
 };
 
 export async function getSiteSettings(): Promise<SiteSettings> {
@@ -629,11 +630,85 @@ export async function resetCohort(): Promise<CohortResetResult> {
   return data as CohortResetResult;
 }
 
-export async function updateAdminChallenge(challengeId: string, updates: { title?: string; slug?: string; difficulty?: string; topic?: string; points?: number; published_at?: string; deadline_at?: string }) {
+type AdminChallengeUpdate = { day?: number; title?: string; slug?: string; difficulty?: string; topic?: string; points?: number; published_at?: string; deadline_at?: string };
+
+export async function updateAdminChallenge(challengeId: string, updates: AdminChallengeUpdate) {
   if (!db) return null;
+  if (updates.day !== undefined) {
+    const { data: dayTaken, error: dayError } = await db.from("challenges").select("id").eq("day", updates.day).neq("id", challengeId).maybeSingle();
+    if (dayError) throw dayError;
+    if (dayTaken) throw new Error("day_taken");
+  }
+  if (updates.slug !== undefined) {
+    const { data: slugTaken, error: slugError } = await db.from("challenges").select("id").eq("slug", updates.slug).neq("id", challengeId).maybeSingle();
+    if (slugError) throw slugError;
+    if (slugTaken) throw new Error("slug_taken");
+  }
+  const { data: current, error: currentError } = await db.from("challenges").select("published_at,deadline_at").eq("id", challengeId).maybeSingle();
+  if (currentError) throw currentError;
+  if (!current) throw new Error("challenge_not_found");
+  const publishedAt = updates.published_at ?? current.published_at;
+  const deadlineAt = updates.deadline_at ?? current.deadline_at;
+  if (Date.parse(deadlineAt) <= Date.parse(publishedAt)) throw new Error("deadline_must_be_after_publish");
   const { data, error } = await db.from("challenges").update(updates).eq("id", challengeId).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
   if (error) throw error;
   return data;
+}
+
+export type DeleteAdminChallengeResult = {
+  deleted: true;
+  challenge: { id: string; day: number; title: string; slug: string };
+  completionsDeleted: number;
+  jobsDeleted: number;
+  profilesRecalculated: number;
+  profilesRecalculationFailed: number;
+};
+
+export async function deleteAdminChallenge(challengeId: string): Promise<DeleteAdminChallengeResult> {
+  if (!db) throw new Error("persistence_not_configured");
+  const { data: challenge, error: challengeError } = await db.from("challenges").select("id,day,title,slug").eq("id", challengeId).maybeSingle();
+  if (challengeError) throw challengeError;
+  if (!challenge) throw new Error("challenge_not_found");
+
+  const [{ data: completions, error: completionError }, { data: jobs, error: jobError }] = await Promise.all([
+    db.from("completions").select("profile_id").eq("challenge_id", challengeId),
+    db.from("verification_jobs").select("id").eq("challenge_id", challengeId),
+  ]);
+  if (completionError) throw completionError;
+  if (jobError) throw jobError;
+  const profileIds = [...new Set((completions ?? []).map((completion) => completion.profile_id as string))];
+
+  // Deleting the question cascades its completions and verification jobs. The
+  // denormalized profile points/streaks then need rebuilding from the records
+  // that remain so removing a question cannot leave inflated scores behind.
+  const { error: deleteError } = await db.from("challenges").delete().eq("id", challengeId);
+  if (deleteError) throw deleteError;
+
+  let profilesRecalculated = 0;
+  let profilesRecalculationFailed = 0;
+  for (const profileId of profileIds) {
+    try {
+      const { data: verified, error: verifiedError } = await db.from("completions").select("awarded_points").eq("profile_id", profileId).eq("status", "verified");
+      if (verifiedError) throw verifiedError;
+      const points = (verified ?? []).reduce((total, completion) => total + (completion.awarded_points ?? 0), 0);
+      const { error: profileError } = await db.from("profiles").update({ points }).eq("id", profileId);
+      if (profileError) throw profileError;
+      await recalculateProfileStreak(profileId);
+      profilesRecalculated += 1;
+    } catch (error) {
+      profilesRecalculationFailed += 1;
+      console.error("challenge_delete_profile_recalculation_failed", profileId, error);
+    }
+  }
+
+  return {
+    deleted: true,
+    challenge,
+    completionsDeleted: completions?.length ?? 0,
+    jobsDeleted: jobs?.length ?? 0,
+    profilesRecalculated,
+    profilesRecalculationFailed,
+  };
 }
 
 export async function reorderAdminChallenges(order: string[]) {

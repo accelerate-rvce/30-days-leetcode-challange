@@ -46,6 +46,7 @@ begin
       longest_streak = 0;
   get diagnostics v_profiles = row_count;
 
+  -- Never delete challenge rows: the cohort keeps its existing question bank.
   -- Keep the relative spacing of any questions already scheduled, then pin
   -- Day 1 to a clean 24-hour window starting now.
   update challenges
@@ -78,7 +79,8 @@ begin
     'jobsDeleted', v_jobs,
     'alertsDeleted', v_alerts,
     'profilesReset', v_profiles,
-    'challengesShifted', v_challenges
+    'challengesShifted', v_challenges,
+    'challengesKept', v_challenges
   );
 end;
 $$;

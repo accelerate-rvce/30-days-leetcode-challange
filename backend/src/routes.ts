@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, deleteAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { checkLeetCodeUser, leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -224,15 +224,60 @@ router.post("/admin/challenges", async (req, res) => {
 router.patch("/admin/challenges/:challengeId", async (req, res) => {
   const adminId = await requireAdmin(req, res);
   if (!adminId) return;
-  const parsed = z.object({ title: z.string().trim().min(1).max(160).optional(), slug: z.string().trim().regex(/^[a-z0-9-]+$/).optional(), difficulty: z.enum(["Easy", "Medium", "Hard"]).optional(), topic: z.string().trim().min(1).max(80).optional(), points: z.number().int().positive().max(100).optional(), published_at: z.string().datetime({ offset: true }).optional(), deadline_at: z.string().datetime({ offset: true }).optional() }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "invalid_challenge_update" });
+  const challengeId = z.string().uuid().safeParse(req.params.challengeId);
+  if (!challengeId.success) return res.status(400).json({ error: "invalid_challenge_id" });
+  const parsed = z.object({
+    day: z.number().int().min(1).max(30).optional(),
+    title: z.string().trim().min(1).max(160).optional(),
+    slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/).optional(),
+    difficulty: z.enum(["Easy", "Medium", "Hard"]).optional(),
+    topic: z.string().trim().min(1).max(80).optional(),
+    points: z.number().int().positive().max(100).optional(),
+    published_at: z.string().datetime({ offset: true }).optional(),
+    deadline_at: z.string().datetime({ offset: true }).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    await writeAdminAuditLog(adminId, { action: "edit_challenge", status: "error", message: "invalid_challenge_update", targetChallengeId: challengeId.data, metadata: { details: parsed.error.flatten() } }).catch(() => {});
+    return res.status(400).json({ error: "invalid_challenge_update", details: parsed.error.flatten() });
+  }
   try {
-    const challenge = await updateAdminChallenge(req.params.challengeId, parsed.data);
-    await writeAdminAuditLog(adminId, { action: "edit_challenge", status: "success", message: `Updated challenge ${challenge?.title ?? req.params.challengeId}`, targetChallengeId: req.params.challengeId, metadata: parsed.data });
+    const challenge = await updateAdminChallenge(challengeId.data, parsed.data);
+    await writeAdminAuditLog(adminId, { action: "edit_challenge", status: "success", message: `Updated Day ${challenge?.day} · ${challenge?.title ?? challengeId.data}`, targetChallengeId: challengeId.data, metadata: parsed.data });
     return res.json({ challenge });
   } catch (error) {
-    await writeAdminAuditLog(adminId, { action: "edit_challenge", status: "error", message: error instanceof Error ? error.message : "challenge_update_failed", targetChallengeId: req.params.challengeId });
-    return res.status(400).json({ error: "challenge_update_failed" });
+    const message = error instanceof Error ? error.message : "challenge_update_failed";
+    await writeAdminAuditLog(adminId, { action: "edit_challenge", status: "error", message, targetChallengeId: challengeId.data }).catch(() => {});
+    const errorCode = ["day_taken", "slug_taken", "deadline_must_be_after_publish", "challenge_not_found"].includes(message) ? message : "challenge_update_failed";
+    return res.status(errorCode === "challenge_not_found" ? 404 : errorCode === "challenge_update_failed" ? 400 : 409).json({ error: errorCode });
+  }
+});
+
+router.delete("/admin/challenges/:challengeId", async (req, res) => {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  const challengeId = z.string().uuid().safeParse(req.params.challengeId);
+  if (!challengeId.success) return res.status(400).json({ error: "invalid_challenge_id" });
+  try {
+    const result = await deleteAdminChallenge(challengeId.data);
+    await writeAdminAuditLog(adminId, {
+      action: "delete_challenge",
+      status: "success",
+      message: `Deleted Day ${result.challenge.day} · ${result.challenge.title}`,
+      metadata: {
+        challengeId: result.challenge.id,
+        day: result.challenge.day,
+        title: result.challenge.title,
+        completionsDeleted: result.completionsDeleted,
+        jobsDeleted: result.jobsDeleted,
+        profilesRecalculated: result.profilesRecalculated,
+        profilesRecalculationFailed: result.profilesRecalculationFailed,
+      },
+    }).catch(() => {});
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "challenge_delete_failed";
+    await writeAdminAuditLog(adminId, { action: "delete_challenge", status: "error", message, targetChallengeId: challengeId.data }).catch(() => {});
+    return res.status(message === "challenge_not_found" ? 404 : 400).json({ error: message === "challenge_not_found" ? message : "challenge_delete_failed" });
   }
 });
 
