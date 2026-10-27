@@ -308,14 +308,37 @@ async function readSolvedByProfile() {
   return solvedByProfile;
 }
 
+const leaderboardCollator = new Intl.Collator("en", { sensitivity: "base" });
+
 async function readLeaderboard(query: string) {
   if (!db) return null;
-  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin").order("points", { ascending: false }).order("streak", { ascending: false }).order("name", { ascending: true });
-  const safeQuery = query.replace(/[,%()]/g, "");
-  if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
+  const request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin");
   const [{ data, error }, solvedByProfile] = await Promise.all([request, readSolvedByProfile()]);
   if (error) throw error;
-  return (data ?? []).map((profile, index) => ({ rank: index + 1, name: profile.name, handle: profile.leetcode_username ?? "", academicYear: profile.academic_year, points: profile.points, streak: profile.streak ?? 0, solved: solvedByProfile.get(profile.id) ?? 0 }));
+
+  // Every row gets a unique ordinal rank. Points are the primary measure;
+  // streak, solved count, and name make the order deterministic instead of
+  // giving dozens of students the same dense rank at the top of the board.
+  const rows = (data ?? []).map((profile) => ({
+    name: profile.name,
+    handle: profile.leetcode_username ?? "",
+    academicYear: profile.academic_year,
+    points: profile.points,
+    streak: profile.streak ?? 0,
+    solved: solvedByProfile.get(profile.id) ?? 0,
+  }));
+  rows.sort((left, right) =>
+    right.points - left.points
+    || right.streak - left.streak
+    || right.solved - left.solved
+    || leaderboardCollator.compare(left.name, right.name)
+    || leaderboardCollator.compare(left.handle, right.handle),
+  );
+
+  const safeQuery = query.replace(/[,%()]/g, "").trim().toLowerCase();
+  return rows
+    .map((row, index) => ({ ...row, rank: index + 1 }))
+    .filter((row) => !safeQuery || `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(safeQuery));
 }
 
 export async function getPersistentJobMetrics() {

@@ -24,7 +24,7 @@ export type DashboardSnapshot = {
   } | null;
 };
 
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 const SNAPSHOT_TTL_MS = 15 * 60_000;
 const SETTINGS_KEY = `30days:settings:v${SNAPSHOT_VERSION}`;
 const SETTINGS_TTL_MS = 5 * 60_000;
