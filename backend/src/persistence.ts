@@ -119,12 +119,24 @@ export async function getPersistentChallenges() {
 
 export async function getPersistentProgress(profileId: string) {
   if (!db) return null;
-  const [{ data: profile, error: profileError }, { data: completions, error: completionError }] = await Promise.all([
+  const [{ data: profile, error: profileError }, { data: completions, error: completionError }, { data: jobs, error: jobError }] = await Promise.all([
     db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").eq("id", profileId).maybeSingle(),
     db.from("completions").select("id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,evidence").eq("profile_id", profileId).order("attempted_at", { ascending: false }),
+    db.from("verification_jobs").select("challenge_id,status,attempts,available_at,last_error").eq("profile_id", profileId),
   ]);
   if (profileError) throw profileError;
   if (completionError) throw completionError;
+  // The queue row is what tells the UI whether a pending completion is still
+  // in flight, waiting on a retry, or has given up — and when it comes back.
+  if (jobError) throw jobError;
+  const jobByChallenge = new Map((jobs ?? []).map((job) => [job.challenge_id as string, job]));
+  const withVerification = (rows: { challenge_id: string; status: string }[]) => rows.map((completion) => {
+    const job = jobByChallenge.get(completion.challenge_id);
+    return {
+      ...completion,
+      verification: job ? { status: job.status, attempts: job.attempts, nextAttemptAt: job.available_at, lastError: job.last_error } : null,
+    };
+  });
   if (!profile) {
     // A new student has authenticated but has not submitted a LeetCode handle
     // yet. Return a transient profile so the registration form can render
@@ -135,7 +147,7 @@ export async function getPersistentProgress(profileId: string) {
     return { profile: { id: profileId, name, leetcode_username: null, academic_year: "Second Year", points: 0, streak: 0, role: "student" }, verifiedCompletions: 0, completionPercentage: 0, statuses: [] };
   }
   const verified = (completions ?? []).filter((item) => item.status === "verified");
-  return { profile, verifiedCompletions: verified.length, completionPercentage: Math.round((verified.length / 30) * 100), statuses: completions ?? [] };
+  return { profile, verifiedCompletions: verified.length, completionPercentage: Math.round((verified.length / 30) * 100), statuses: withVerification(completions ?? []) };
 }
 
 async function getActiveChallengeDay() {
@@ -741,10 +753,34 @@ export async function manuallyVerifyPersistentCompletion(profileId: string, chal
 
 export async function enqueuePersistentVerification(profileId: string, challengeId: string) {
   if (!db) return;
-  // An explicit retry should get the full not-found retry budget again. The
-  // SQL enqueue function preserves attempts, so reset it before re-queueing.
-  const { error: resetError } = await db.from("verification_jobs").update({ attempts: 0 }).eq("profile_id", profileId).eq("challenge_id", challengeId);
-  if (resetError) throw resetError;
+  // Checking a submission must work even if the attempt row never made it in
+  // (a failed /events/open, a cleared row). Create it as pending; the SQL
+  // enqueue function only queues pending completions.
+  const { error: openError } = await db.from("completions").upsert(
+    { profile_id: profileId, challenge_id: challengeId, status: "pending" },
+    { onConflict: "profile_id,challenge_id", ignoreDuplicates: true },
+  );
+  if (openError) throw openError;
+  // A previous attempt may have finished in a terminal not-found state.
+  // Pressing "Check Now" is a fresh attempt, so reopen the row.
+  const { error: reopenError } = await db.from("completions").update({ status: "pending" }).eq("profile_id", profileId).eq("challenge_id", challengeId).neq("status", "verified");
+  if (reopenError) throw reopenError;
+
+  // Never reset the retry budget of a job another worker is holding: that
+  // would let a repeated click extend or restart an in-flight check.
+  const { data: job, error: jobError } = await db.from("verification_jobs")
+    .select("status,locked_at")
+    .eq("profile_id", profileId)
+    .eq("challenge_id", challengeId)
+    .maybeSingle();
+  if (jobError) throw jobError;
+  const lockedAt = job?.locked_at ? Date.parse(job.locked_at) : NaN;
+  const activelyProcessing = job?.status === "processing" && Number.isFinite(lockedAt) && Date.now() - lockedAt < 5 * 60_000;
+  if (!activelyProcessing) {
+    const { error: resetError } = await db.from("verification_jobs").update({ attempts: 0 }).eq("profile_id", profileId).eq("challenge_id", challengeId);
+    if (resetError) throw resetError;
+  }
+
   const { error } = await db.rpc("enqueue_verification_job", { p_profile_id: profileId, p_challenge_id: challengeId });
   if (error) throw error;
 }
@@ -786,12 +822,25 @@ export async function markPersistentRetry(job: ClaimedJob, errorMessage: string,
 export async function markPersistentNotFound(job: ClaimedJob, maxRetries: number) {
   if (!db) return;
   const terminal = job.attempts >= maxRetries;
+  // Back off as attempts accumulate (15m, 30m, 1h, 2h) instead of hammering
+  // LeetCode every 15 minutes for a student who simply has not solved it.
+  const backoffMs = Math.min(2 * 60 * 60_000, 15 * 60_000 * 2 ** Math.max(0, Math.min(job.attempts - 1, 3)));
   await db.from("verification_jobs").update({
     status: terminal ? "failed" : "retry",
-    available_at: new Date(Date.now() + (terminal ? 0 : withJitter(15 * 60_000))).toISOString(),
+    available_at: new Date(Date.now() + (terminal ? 0 : withJitter(backoffMs))).toISOString(),
     last_error: "no_matching_accepted_submission",
     locked_at: null,
   }).eq("id", job.id);
+  // Once the retry budget is gone the completion is no longer pending, so the
+  // student's UI stops showing an open-ended check. The Realtime listener on
+  // completions turns this into an immediate "not found" message.
+  if (terminal) {
+    await db.from("completions")
+      .update({ status: "not_verified" })
+      .eq("profile_id", job.profile_id)
+      .eq("challenge_id", job.challenge_id)
+      .neq("status", "verified");
+  }
 }
 
 export async function markPersistentVerified(job: ClaimedJob, submissionId: string, submissionAt: string, challenge: Challenge) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useId, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { Session } from "@supabase/supabase-js";
@@ -9,11 +9,15 @@ import { formatDate, formatTime } from "./format";
 import { Metric } from "./Metric";
 import type { AdminChallenge, AdminCompletion, AdminJob, AdminLog, AdminMetrics, AdminOverview, AdminUser, Challenge, LeaderboardRow, Progress, SiteSettings } from "./dashboard-types";
 import ParticleText from "./ParticleText";
+import { playVerifiedSound, unlockVerifiedSound } from "../lib/verified-sound";
 
 const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
   ssr: false,
   loading: () => <section className="panel"><p className="empty-copy">Loading admin controls…</p></section>,
 });
+
+// Rive touches canvas/wasm at import time, so keep it out of the server render.
+const VerifiedCelebration = dynamic(() => import("./VerifiedCelebration"), { ssr: false });
 
 type View = "overview" | "challenge" | "progress" | "leaderboard" | "resources" | "support" | "admin";
 type OnboardingStage = "welcome" | "briefing" | "signin" | "waitlist" | "ready";
@@ -171,6 +175,16 @@ export default function ChallengeApp() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState("");
   const [settingsRetry, setSettingsRetry] = useState(0);
+  // The check a student just triggered, if any. The Realtime listener (not a
+  // timer) is what resolves it; the marker only survives long enough to stop a
+  // stale response from overwriting a newer check.
+  const pendingCheck = useRef<{ challengeId: string; settled: boolean } | null>(null);
+  const [celebration, setCelebration] = useState<{ challengeId: string; points: number } | null>(null);
+  const dismissCelebration = useCallback(() => setCelebration(null), []);
+  const celebrate = useCallback((challengeId: string, points: number) => {
+    setCelebration({ challengeId, points });
+    void playVerifiedSound();
+  }, []);
   const api = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:4000").replace(/\/+$/, "");
   const token = session?.access_token;
   useGridSpotlight();
@@ -301,6 +315,64 @@ export default function ChallengeApp() {
     void load();
   }, [api, authLoading, token, siteSettings?.waitlistEnabled]);
 
+  const realtimeProfileId = session?.user.id ?? null;
+
+  // One long-lived channel per signed-in student. RLS already limits
+  // `completions` to the caller's own rows, and the filter narrows the stream to
+  // this profile, so the browser never receives another student's writes.
+  useEffect(() => {
+    if (!supabase || !realtimeProfileId || !token) return;
+    const client = supabase;
+    const headers = { Authorization: `Bearer ${token}` };
+    let disposed = false;
+
+    const sync = async () => {
+      const [progressResponse, leaderboardResponse] = await Promise.all([
+        fetch(`${api}/api/progress`, { headers }).catch(() => null),
+        fetch(`${api}/api/leaderboard`, { headers }).catch(() => null),
+      ]);
+      if (disposed) return;
+      if (progressResponse?.ok) setProgress(await progressResponse.json() as Progress);
+      if (leaderboardResponse?.ok) setLeaderboard((await leaderboardResponse.json() as { rows: LeaderboardRow[] }).rows ?? []);
+    };
+
+    const channel = client
+      .channel(`completions:${realtimeProfileId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "completions", filter: `profile_id=eq.${realtimeProfileId}` }, (payload) => {
+        const row = payload.new as { challenge_id?: string; status?: string; awarded_points?: number | null } | undefined;
+        if (!row?.challenge_id || !row.status) return;
+        // Paint the verdict immediately; the refetch below reconciles the
+        // profile points/streak the worker writes just after the completion.
+        setProgress((current) => current ? { ...current, statuses: mergeCompletionStatus(current.statuses, { challenge_id: row.challenge_id!, status: row.status!, awarded_points: row.awarded_points ?? undefined }) } : current);
+        const pending = pendingCheck.current;
+        if (pending && !pending.settled && pending.challengeId === row.challenge_id) {
+          if (row.status === "verified") {
+            pending.settled = true;
+            setVerifying(false);
+            setVerifyMessage(row.awarded_points ? `Verified! +${row.awarded_points} points awarded.` : "Verified! Points awarded.");
+            celebrate(row.challenge_id!, row.awarded_points ?? 0);
+          } else if (row.status === "not_verified") {
+            pending.settled = true;
+            setVerifying(false);
+            setVerifyMessage("No accepted submission found for this problem yet. Solve it on LeetCode, then press Check Now again.");
+          }
+        }
+        void sync();
+      })
+      .subscribe((status) => {
+        // Fires on first connect and again after every reconnect. Re-reading
+        // here recovers anything missed while the socket was down.
+        if (status === "SUBSCRIBED") void sync();
+      });
+
+    return () => {
+      disposed = true;
+      // Leave pendingCheck alone: a token refresh re-runs this effect, and the
+      // in-flight check should still be resolved by the reconnected channel.
+      void client.removeChannel(channel);
+    };
+  }, [api, celebrate, realtimeProfileId, token]);
+
   useEffect(() => {
     if (session && progress && view === "admin" && progress.profile.role !== "admin") router.replace("/");
   }, [view, progress, router, session]);
@@ -356,38 +428,52 @@ export default function ChallengeApp() {
     const target = challenges.find((item) => item.id === selectedChallengeId) ?? challenge;
     if (!target || !token || verifying) return;
     setVerifying(true); setVerifyMessage("Checking your LeetCode submission…"); setError("");
+    // Browsers only allow audio after a gesture; the verdict arrives later, so
+    // prime the context on this click.
+    unlockVerifiedSound();
+    const headers = { Authorization: `Bearer ${token}` };
     try {
+      // The API only writes a job row and answers Pending; it never waits on
+      // LeetCode. The worker resolves it and the channel above reports back.
       const queueResponse = await fetch(`${api}/api/verification/request`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ challengeId: target.id }) });
       if (!queueResponse.ok) throw new Error("verification_queue_failed");
-      // Poll progress until the single Accepted submission is verified
-      // (backend awards points idempotently — 1 correct submission = points once).
-      const headers = { Authorization: `Bearer ${token}` };
-      for (let attempt = 0; attempt < 18; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        const progressResponse = await fetch(`${api}/api/progress`, { headers });
-        if (!progressResponse.ok) continue;
-        const next = await progressResponse.json() as Progress;
-        setProgress(next);
-        const entry = next.statuses.find((item) => item.challenge_id === target.id);
-        if (entry?.status === "verified") {
-          const points = entry.awarded_points ?? target.points;
-          // The backend updates the profile streak just after the completion
-          // flips to verified. Re-read once so the dashboard reflects the new
-          // streak, score, and leaderboard position without a page reload.
-          await new Promise((resolve) => setTimeout(resolve, 700));
-          const [latestProgressResponse, latestLeaderboardResponse] = await Promise.all([
-            fetch(`${api}/api/progress`, { headers }),
-            fetch(`${api}/api/leaderboard`, { headers }),
-          ]);
-          if (latestProgressResponse.ok) setProgress(await latestProgressResponse.json() as Progress);
-          if (latestLeaderboardResponse.ok) setLeaderboard((await latestLeaderboardResponse.json() as { rows: LeaderboardRow[] }).rows ?? []);
-          setVerifyMessage(`Verified! +${points} points awarded.`);
-          return;
-        }
+    } catch {
+      setError("We couldn’t check your submission. Please try again.");
+      setVerifyMessage(""); setVerifying(false);
+      return;
+    }
+
+    const pending: { challengeId: string; settled: boolean } = { challengeId: target.id, settled: false };
+    pendingCheck.current = pending;
+    const isCurrent = () => !pending.settled && pendingCheck.current === pending;
+
+    // One delayed read covers a dropped socket. It is not a poll: normal
+    // resolution comes from the subscription, and the channel re-syncs itself
+    // on reconnect.
+    void (async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20_000));
+      if (!isCurrent()) return;
+      const progressResponse = await fetch(`${api}/api/progress`, { headers }).catch(() => null);
+      if (!isCurrent()) return;
+      if (!progressResponse?.ok) {
+        setVerifying(false);
+        setVerifyMessage("We couldn’t confirm the check yet. Live updates may be paused — press Check Now again in a moment.");
+        return;
       }
-      setVerifyMessage("No accepted submission found yet. If you solved it, make sure your LeetCode submission history is visible, then try again.");
-    } catch { setError("We couldn’t check your submission. Please try again."); setVerifyMessage(""); }
-    finally { setVerifying(false); }
+      const next = await progressResponse.json() as Progress;
+      setProgress(next);
+      const entry = next.statuses.find((item) => item.challenge_id === target.id);
+      if (entry?.status === "verified") {
+        pending.settled = true;
+        setVerifying(false);
+        setVerifyMessage(entry.awarded_points ? `Verified! +${entry.awarded_points} points awarded.` : "Verified! Points awarded.");
+        celebrate(target.id, entry.awarded_points ?? 0);
+        return;
+      }
+      if (!isCurrent()) return;
+      setVerifying(false);
+      setVerifyMessage(pendingVerificationMessage(entry));
+    })();
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -465,13 +551,35 @@ export default function ChallengeApp() {
     {view === "resources" && <Resources query={resourceQuery} setQuery={setResourceQuery} filtered={filteredResources} />}
     {view === "support" && <Support />}
     {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} completions={adminCompletions} onReturn={() => router.push("/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminCompletions(overview.completions); setAdminLogs(overview.logs); }} onSettingsSaved={(next) => { setSiteSettings(next); setSettingsError(""); }} />}
-  </main><footer><span>ACCELERATE // THE COMPUTER SCIENCE CLUB OF RVCE · MYSURU ROAD, BENGALURU 560059</span><span>INNOVATE · CONNECT · INSPIRE</span></footer></div>;
+  </main><footer><span>ACCELERATE // THE COMPUTER SCIENCE CLUB OF RVCE · MYSURU ROAD, BENGALURU 560059</span><span>INNOVATE · CONNECT · INSPIRE</span></footer>{celebration && <VerifiedCelebration points={celebration.points} day={challenges.find((item) => item.id === celebration.challengeId)?.day} onDismiss={dismissCelebration} />}</div>;
 }
 
 function ChallengeCard({ challenge, onOpen }: { challenge: Challenge | null; onOpen: () => void }) { return <article className="panel challenge-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY’S QUESTION {challenge && <span className="muted">· DAY {String(challenge.day).padStart(2, "0")}</span>}</div><h2>{challenge?.title ?? "No challenge published"}</h2></div>{challenge && <span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()}</span>}</div>{challenge ? <><div className="problem-meta"><span><b>{challenge.slug.toUpperCase()}</b> PROBLEM ID</span><span><b>{challenge.points} PTS</b> AVAILABLE</span><span><b>{formatTime(challenge.deadlineAt)} IST</b> DEADLINE</span></div><p className="challenge-privacy-note">Before you submit, turn on “Display my submission history” in <a href="https://leetcode.com/profile/privacy/" target="_blank" rel="noreferrer">LeetCode privacy settings</a>.</p><button className="primary-button" onClick={onOpen}>Open question <span>→</span></button></> : <p className="empty-copy">The next challenge will appear here when it is published.</p>}</article>; }
 function ChallengeHistory({ challenges, currentChallenge, onSelect }: { challenges: Challenge[]; currentChallenge: Challenge | null; onSelect: (id: string) => void }) { const currentDay = currentChallenge?.day ?? 31; const past = challenges.filter((item) => item.id !== currentChallenge?.id && item.day < currentDay); return <article className="panel activity-panel"><div className="eyebrow">CHALLENGE HISTORY</div><h2>Complete a missed challenge</h2>{past.length === 0 ? <p className="empty-copy">No earlier challenges are available.</p> : <div className="activity-list">{past.map((item) => <div className="activity-row" key={item.id}><span className="question-day">DAY {String(item.day).padStart(2, "0")}</span><div><strong>{item.title}</strong><p>Late completion · 70 points</p></div><button className="text-button" onClick={() => onSelect(item.id)}>Open →</button></div>)}</div>}</article>; }
 function StreakTracker({ challenges, progress, currentChallenge }: { challenges: Challenge[]; progress: Progress | null; currentChallenge: Challenge | null }) { const completedDays = new Set((progress?.statuses ?? []).filter((item) => item.status === "verified").map((item) => challenges.find((challenge) => challenge.id === item.challenge_id)?.day).filter((day): day is number => typeof day === "number")); return <article className="panel tracker-panel"><div className="panel-heading"><div><div className="eyebrow">STREAK TRACKER</div><h2>30 days in motion</h2></div><span className="tracker-count">{progress?.profile.streak ?? 0} <small>/ 30</small></span></div><div className="day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; return <span key={day} className={completedDays.has(day) ? "complete" : currentChallenge?.day === day ? "today" : ""}>{String(day).padStart(2, "0")}</span>; })}</div><div className="tracker-foot"><span><span className="legend complete" /> verified</span><span><span className="legend today" /> current</span><span>next challenge at 18:00 IST</span></div></article>; }
-function ChallengeDetail({ challenge, attemptRecorded, recording, verifying, verifyMessage, verificationStatus, awardedPoints, onSolve, onVerify }: { challenge: Challenge | null; attemptRecorded: boolean; recording: boolean; verifying: boolean; verifyMessage: string; verificationStatus: string | null; awardedPoints?: number; onSolve: () => void; onVerify: () => void }) { const now = useNow(); if (!challenge) return <EmptyPanel title="No challenge published" copy="There is no active challenge in the live database." />; const isVerified = verificationStatus === "verified"; return <section className="challenge-detail-layout"><article className="panel challenge-detail"><div className="eyebrow"><span className="accent-dot" /> DAY {String(challenge.day).padStart(2, "0")} · PUBLISHED {formatTime(challenge.publishedAt)} IST</div><div className="detail-title-row"><div><h2>{challenge.title}</h2><p className="slug">leetcode.com/problems/{challenge.slug}</p></div><span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()} · {challenge.points} PTS</span></div>{!isVerified && <div className="verification-callout"><strong>Before you submit</strong><p>Turn on “Display my submission history” in <a href="https://leetcode.com/profile/privacy/" target="_blank" rel="noreferrer">LeetCode privacy settings</a>. If it is off, we cannot see your accepted submissions and cannot award points.</p></div>}<div className="detail-actions"><button className="primary-button" onClick={onSolve} disabled={recording}>{recording ? "Recording…" : attemptRecorded ? "Open on LeetCode" : "Solve on LeetCode"} <span>↗</span></button>{attemptRecorded && !isVerified && <button className="secondary-button" onClick={onVerify} disabled={verifying}>{verifying ? "Checking…" : "I’ve submitted — Get points"}</button>}<span className={isVerified ? "verification recorded" : attemptRecorded ? "verification recorded" : "verification"}>{isVerified ? `✓ VERIFIED +${awardedPoints ?? challenge.points} PTS` : attemptRecorded ? "✓ ATTEMPT RECORDED" : "○ NOT ATTEMPTED"}</span></div>{verifyMessage && <p className="empty-copy" role="status">{verifyMessage}</p>}{isVerified && <p className="empty-copy">1 accepted submission = points credited once. Re-submissions never award duplicates.</p>}</article><aside className="panel deadline-card"><div className="eyebrow">VERIFICATION WINDOW</div><div className="countdown" role="timer" aria-label="Time remaining until the deadline">{formatCountdown(challenge.deadlineAt, now)}</div><p>Deadline · {formatDate(challenge.deadlineAt)}</p><div className="status-list"><div><span className={attemptRecorded ? "status-dot" : "muted-dot"} /> Attempt recorded <b>{attemptRecorded ? "yes" : "pending"}</b></div><div><span className={isVerified ? "status-dot" : "muted-dot"} /> Submission check <b>{isVerified ? "verified" : "1 Accepted = points"}</b></div><div><span className="muted-dot" /> Points <b>{challenge.points} pts</b></div></div></aside></section>; }
+function ChallengeDetail({ challenge, attemptRecorded, recording, verifying, verifyMessage, verificationStatus, awardedPoints, onSolve, onVerify }: { challenge: Challenge | null; attemptRecorded: boolean; recording: boolean; verifying: boolean; verifyMessage: string; verificationStatus: string | null; awardedPoints?: number; onSolve: () => void; onVerify: () => void }) { const now = useNow(); if (!challenge) return <EmptyPanel title="No challenge published" copy="There is no active challenge in the live database." />; const isVerified = verificationStatus === "verified"; return <section className="challenge-detail-layout"><article className="panel challenge-detail"><div className="eyebrow"><span className="accent-dot" /> DAY {String(challenge.day).padStart(2, "0")} · PUBLISHED {formatTime(challenge.publishedAt)} IST</div><div className="detail-title-row"><div><h2>{challenge.title}</h2><p className="slug">leetcode.com/problems/{challenge.slug}</p></div><span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()} · {challenge.points} PTS</span></div>{!isVerified && <div className="verification-callout"><strong>Before you submit</strong><p>Curate your profile – control what opens to the public. <a href="https://leetcode.com/profile/privacy/" target="_blank" rel="noreferrer">Recent AC Problems and Submission Details</a> must be visible. <span className="on">On</span> includes your Submission Heatmap. If these are hidden, we cannot see your accepted submissions and cannot award points.</p></div>}<div className="detail-actions"><button className="primary-button" onClick={onSolve} disabled={recording}>{recording ? "Recording…" : attemptRecorded ? "Open on LeetCode" : "Solve on LeetCode"} <span>↗</span></button>{attemptRecorded && !isVerified && <button className="secondary-button" onClick={onVerify} disabled={verifying}>{verifying ? "Checking…" : "Check Now"}</button>}<span className={isVerified ? "verification recorded" : attemptRecorded ? "verification recorded" : "verification"}>{isVerified ? `✓ VERIFIED +${awardedPoints ?? challenge.points} PTS` : attemptRecorded ? "✓ ATTEMPT RECORDED" : "○ NOT ATTEMPTED"}</span></div>{verifyMessage && <p className="empty-copy" role="status">{verifyMessage}</p>}{isVerified && <p className="empty-copy">1 accepted submission = points credited once. Re-submissions never award duplicates.</p>}</article><aside className="panel deadline-card"><div className="eyebrow">VERIFICATION WINDOW</div><div className="countdown" role="timer" aria-label="Time remaining until the deadline">{formatCountdown(challenge.deadlineAt, now)}</div><p>Deadline · {formatDate(challenge.deadlineAt)}</p><div className="status-list"><div><span className={attemptRecorded ? "status-dot" : "muted-dot"} /> Attempt recorded <b>{attemptRecorded ? "yes" : "pending"}</b></div><div><span className={isVerified ? "status-dot" : "muted-dot"} /> Submission check <b>{isVerified ? "verified" : "1 Accepted = points"}</b></div><div><span className="muted-dot" /> Points <b>{challenge.points} pts</b></div></div></aside></section>; }
+function mergeCompletionStatus(statuses: Progress["statuses"], row: { challenge_id: string; status: string; awarded_points?: number }) {
+  const existing = statuses.find((item) => item.challenge_id === row.challenge_id);
+  const merged = { ...existing, ...row } as Progress["statuses"][number];
+  return existing
+    ? statuses.map((item) => item.challenge_id === row.challenge_id ? merged : item)
+    : [...statuses, merged];
+}
+
+// The queue row is the accurate error state: it says whether a pending check is
+// in flight, waiting on a scheduled retry, or has given up entirely.
+function pendingVerificationMessage(entry?: Progress["statuses"][number]) {
+  const job = entry?.verification;
+  if (!job) return "No match yet. The worker keeps checking in the background, so press Check Now again once your solve shows up on LeetCode.";
+  if (job.status === "failed" || entry?.status === "not_verified") return "No accepted submission was found for this problem. Make sure your LeetCode submission history is public, then press Check Now to try again.";
+  const next = job.nextAttemptAt ? Date.parse(job.nextAttemptAt) : NaN;
+  if (Number.isFinite(next) && next > Date.now() + 30_000) {
+    const minutes = Math.max(1, Math.round((next - Date.now()) / 60_000));
+    return `No match yet. The next automatic check runs in about ${minutes} minute${minutes === 1 ? "" : "s"} — or press Check Now once you have solved it.`;
+  }
+  return "No accepted submission yet. The worker is still checking, so press Check Now again once your solve shows up on LeetCode.";
+}
+
 function formatCountdown(deadline: string, now: number) { const remaining = Math.max(0, Date.parse(deadline) - now); const hours = Math.floor(remaining / 3_600_000); const minutes = Math.floor((remaining % 3_600_000) / 60_000); const seconds = Math.floor((remaining % 60_000) / 1_000); return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`; }
 function ProgressView({ progress, verifiedCount, challenges }: { progress: Progress | null; verifiedCount: number; challenges: Challenge[] }) { const verifiedItems = (progress?.statuses ?? []).filter((item) => item.status === "verified"); const recent = verifiedItems.slice(0, 3); const difficultyCounts = challenges.filter((challenge) => verifiedItems.some((item) => item.challenge_id === challenge.id)).reduce((counts, challenge) => { counts[challenge.difficulty] += 1; return counts; }, { Easy: 0, Medium: 0, Hard: 0 } as Record<string, number>); return <section className="progress-layout"><div className="progress-main"><article className="panel progress-hero"><div><div className="eyebrow">YOUR VERIFIED RECORD</div><h2>{verifiedCount} of 30 days complete</h2><p>Keep showing up. Your streak is based on verified solutions, not clicks.</p></div><div className="big-progress">{progress?.completionPercentage ?? 0}<span>%</span></div></article><section className="metrics-grid progress-metrics"><Metric label="VERIFIED COMPLETIONS" value={String(verifiedCount).padStart(2, "0")} detail="No duplicate points awarded" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" accent /><Metric label="TOTAL POINTS" value={String(progress?.profile.points ?? 0)} detail="Database-backed score" /><Metric label="DIFFICULTY MIX" value={`${difficultyCounts.Easy} · ${difficultyCounts.Medium} · ${difficultyCounts.Hard}`} detail="Easy · medium · hard" /></section><article className="panel activity-panel"><div className="panel-heading"><div><div className="eyebrow">CHALLENGE CALENDAR</div><h2>Consistency at a glance</h2></div><span className="mini-tag">ASIA / KOLKATA</span></div><div className="day-grid large-day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; const challenge = challenges.find((item) => item.day === day); const complete = challenge ? verifiedItems.some((item) => item.challenge_id === challenge.id) : false; return <span key={day} className={complete ? "complete" : ""}>{String(day).padStart(2, "0")}</span>; })}</div></article></div><aside className="progress-side"><article className="panel"><div className="eyebrow">RECENT ACTIVITY</div>{recent.length ? recent.map((item) => { const challenge = challenges.find((candidate) => candidate.id === item.challenge_id); return <div className="history-row" key={item.challenge_id}><span className="history-day">{String(challenge?.day ?? "—").padStart(2, "0")}</span><div><strong>{challenge?.title ?? "Verified challenge"}</strong><small>Verified · +{item.awarded_points ?? 0} pts</small></div><span className="verified">✓</span></div>; }) : <p className="empty-copy">No verified activity yet.</p>}</article><article className="panel"><div className="eyebrow">RULES THAT COUNT</div><p className="rule-copy">A streak day is earned only when the backend verifies an accepted submission inside that challenge&apos;s eligibility window.</p></article></aside></section>; }
 const LEADERBOARD_PAGE_SIZE = 10;

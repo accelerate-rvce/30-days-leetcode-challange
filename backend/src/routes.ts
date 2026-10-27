@@ -109,7 +109,7 @@ router.post("/verification/request", async (req, res) => {
       }
     }
   }
-  return res.status(202).json({ queued: true, persisted: true, immediate });
+  return res.status(202).json({ queued: true, persisted: true, status: "pending", immediate });
 });
 
 router.post("/cron/verify", async (req, res) => {

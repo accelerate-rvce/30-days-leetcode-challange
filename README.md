@@ -38,6 +38,69 @@ Opening a challenge records one idempotent attempt in Supabase; it does not call
 
 LeetCode checks are deliberately batched and paced. Up to eight users share one aliased GraphQL query, requests start at least 1.5 seconds apart globally, and a daily request budget plus 429/403 cooldown prevent a large cohort from becoming a burst. A per-student cooldown keeps repeated “check submission” clicks from starting back-to-back verification cycles. Tune these with the `LEETCODE_*` and `VERIFICATION_KICK_COOLDOWN_MS` variables in `backend/.env.example`.
 
+## Verification round trip
+
+1. “Check Now” calls `POST /api/verification/request`, which makes sure the
+   completion exists and is `pending`, resets a finished job’s retry budget
+   (never one that is actively processing), queues the job, and returns `202`
+   immediately. Nothing waits on LeetCode in the request path.
+2. The worker claims up to `VERIFY_BATCH_SIZE` jobs, groups them by student, and
+   fetches recent accepted submissions for up to eight students per aliased
+   GraphQL request.
+3. Each job is matched on problem slug, `Accepted` status, and a submission
+   timestamp inside the challenge window.
+4. `finalize_verified_completion` flips the completion to `verified`, awards
+   points once, and the worker refreshes the profile’s streak. A terminal
+   not-found verdict writes `not_verified` on the completion.
+5. The browser holds one Supabase Realtime subscription per signed-in student,
+   filtered to that profile’s own `completions` rows (RLS scopes the rest), so
+   the score, streak, and status message update the moment the worker commits.
+   The subscription re-reads `/api/progress` every time it reaches `SUBSCRIBED`,
+   which gives the initial state on connect and full recovery after a drop. A
+   single delayed read at 20s covers the case where the socket never comes up;
+   there is no polling loop.
+
+### Queue guarantees
+
+`verification_jobs` has `unique(profile_id, challenge_id)`, so a student can
+never have two live jobs for one challenge. `enqueue_verification_job`
+(migration `011`) refuses to requeue a job while another worker holds a fresh
+`processing` lock, `claim_verification_jobs` takes rows with
+`for update skip locked`, and an explicit “Check Now” neither resets the retry
+budget of an in-flight job nor creates a second one. Points are awarded inside
+`finalize_verified_completion`, which is idempotent, so a duplicate delivery can
+never double-score.
+
+### Retry and error states
+
+- Not found: retried with escalating backoff (15m, 30m, 1h, 2h) up to
+  `LEETCODE_MAX_RETRIES`, then the completion becomes `not_verified`.
+- Throttled (429/403/503), network failure, or an exhausted daily budget: the job
+  goes back to `retry` without consuming the not-found budget, waking after the
+  cooldown or at the next UTC day.
+- Each `/api/progress` status now carries its queue row
+  (`verification.status`, `attempts`, `nextAttemptAt`, `lastError`), so the UI
+  can say “next automatic check in about 30 minutes” instead of guessing.
+
+### Verification celebration
+
+When a completion flips to `verified`, the UI shows a small Rive mascot card and
+plays a chime. Both are client-side only:
+
+- `frontend/app/components/Kabi.tsx` drives `/kabi.riv` (state machine `Kabi`,
+  inputs `pose`, `mood`, `lookX`, `lookY`, `jump`). The celebration sets
+  `pose=7` (celebrate) and `mood=1` (happy), and Kabi's head/eyes follow the
+  pointer (`lookX`/`lookY` accept -100..100). Drop the exported file at
+  `frontend/app/public/kabi.riv`; until it exists the card renders a verified
+  medallion instead of an empty canvas.
+- `frontend/app/public/sounds/verified.wav` is the chime. It is unlocked by the
+  Check Now click and played from the Realtime callback, with a synthesized
+  fallback if the file cannot be fetched.
+
+Realtime requires migration `010_enable_realtime.sql`, which adds `completions`
+to the `supabase_realtime` publication. Row level security already limits each
+signed-in student to their own completions, so Realtime delivers only their row.
+
 Production setup requires applying every migration in `backend/database/migrations/` in numeric order, then configuring the Supabase service-role key and `CRON_SECRET` on Render. The GitHub Actions workflow at `.github/workflows/verification-cron.yml` calls `/api/cron/verify` every ten minutes; set repository secrets `RENDER_BACKEND_URL` and `CRON_SECRET` to wake the free Render web service and process verification batches.
 
 ## Production boundaries
