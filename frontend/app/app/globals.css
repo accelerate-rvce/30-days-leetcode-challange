@@ -479,3 +479,12 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
 @keyframes celebration-in { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .verified-celebration { animation: none; } }
 @media (max-width: 640px) { .verified-celebration { bottom: 16px; left: 16px; max-width: none; right: 16px; } }
+
+/* The LeetCode privacy checklist on the challenge page. Both toggles have to
+   be on before the verifier can see an accepted submission. */
+.privacy-rows { display: grid; gap: 6px; list-style: none; margin: 10px 0; max-width: 540px; padding: 0; }
+.privacy-rows li { align-items: center; background: rgba(4,5,10,.55); border: 1px solid var(--line); border-radius: 5px; display: flex; gap: 16px; justify-content: space-between; padding: 8px 10px; }
+.privacy-rows li span { color: var(--soft); font-family: var(--font-geist-mono); font-size: 10px; letter-spacing: .04em; line-height: 1.5; }
+.privacy-rows li b { color: var(--accent); font-family: var(--font-geist-mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.challenge-panel .challenge-privacy-note strong { color: var(--soft); }
+.challenge-panel .challenge-privacy-note b { color: var(--accent); font-weight: 600; }
