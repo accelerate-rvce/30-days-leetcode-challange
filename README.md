@@ -32,11 +32,38 @@ npm run dev:backend         # backend on :4000
 npm run dev:worker          # scheduler and verification worker
 ```
 
-The backend exposes `GET /health`, `GET /api/challenges/current`, `POST /api/events/open`, `GET /api/progress`, and `GET /api/leaderboard`.
+The backend exposes `GET /health`, `GET /api/bootstrap`, `GET /api/challenges/current`, `POST /api/events/open`, `GET /api/progress`, and `GET /api/leaderboard`.
 
 Opening a challenge records one idempotent attempt in Supabase; it does not call LeetCode. After each challenge deadline, the verifier discovers pending completions, claims jobs with database row locks, groups them by user, and fetches each user’s recent accepted submissions once. Verification retries are persisted, and point awards are transactionally guarded so a repeated submission or retry cannot award duplicate points.
 
 LeetCode checks are deliberately batched and paced. Up to eight users share one aliased GraphQL query, requests start at least 1.5 seconds apart globally, and a daily request budget plus 429/403 cooldown prevent a large cohort from becoming a burst. A per-student cooldown keeps repeated “check submission” clicks from starting back-to-back verification cycles. Tune these with the `LEETCODE_*` and `VERIFICATION_KICK_COOLDOWN_MS` variables in `backend/.env.example`.
+
+## Dashboard loading and live updates
+
+The dashboard paints from a single `GET /api/bootstrap` request that returns the
+launch gate, the current challenge, the challenge list, the student's progress,
+the leaderboard, the next scheduled publish, and (for admins) the monitoring
+panels. It replaces four separate calls, each of which paid for its own CORS
+preflight, token validation, and database round trips.
+
+- `userIdFromAccessToken` caches a validated token for 30 seconds, so a burst of
+  requests shares one Supabase Auth call. Rejected tokens are cached for five
+  seconds, not thirty.
+- Settings, the challenge window, and the leaderboard are micro-cached in the
+  backend for 5–30 seconds and invalidated by the admin writes that change them.
+  The cache is per instance; with multiple replicas the worst case is one TTL of
+  staleness.
+- The browser keeps a 15-minute snapshot of the last dashboard payload in
+  `localStorage`, paints it immediately, and revalidates in the background.
+  Signing out clears it. A missing `/api/bootstrap` (rolling deploy) falls back
+  to the per-resource endpoints.
+- A new question appears without a reload: the tab subscribes to `challenges`
+  over Realtime (migration `012_realtime_challenges.sql`), schedules a refresh at
+  the next `published_at` and at the current deadline, and re-reads when the tab
+  becomes visible or the connection returns. Nothing polls the challenge
+  endpoints.
+- The waitlist setting is re-read every five minutes while visible instead of
+  every minute.
 
 ## Verification round trip
 

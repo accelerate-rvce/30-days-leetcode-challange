@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, deleteAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, deleteAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getNextChallengePublishAt, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { checkLeetCodeUser, leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -57,6 +57,53 @@ router.get("/settings", async (_req, res) => {
     return res.json(await getSiteSettings());
   } catch {
     return res.status(503).json({ error: "settings_unavailable" });
+  }
+});
+
+// One request for everything the dashboard paints on first load. It replaces
+// four separate calls, each of which paid for its own CORS preflight, token
+// validation and database round trips. The pieces are fetched in parallel and
+// the launch gate is applied to the response, so closed cohorts still receive
+// no challenge content.
+router.get("/bootstrap", async (req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+
+  try {
+    const [settings, progress, leaderboard, challenge, challenges, nextPublishAt] = await Promise.all([
+      getSiteSettings(),
+      getPersistentProgress(profileId),
+      getPersistentLeaderboard(""),
+      getPersistentCurrentChallenge(),
+      getPersistentChallenges(),
+      getNextChallengePublishAt(),
+    ]);
+    const isAdmin = progress?.profile.role === "admin";
+    const launchGated = Boolean(settings.waitlistEnabled && !isAdmin);
+
+    const admin = isAdmin
+      ? await Promise.all([getPersistentAdminMetrics(), getAdminChallenges(), getAdminUsers(), getAdminVerificationJobs(), getAdminAuditLogs(), getAdminCompletions()])
+        .then(([metrics, adminChallenges, users, jobs, logs, completions]) => ({ metrics, challenges: adminChallenges, users, jobs, logs, completions }))
+        .catch(() => null)
+      : null;
+
+    res.set("Cache-Control", "private, no-store");
+    return res.json({
+      settings,
+      launchGated,
+      challenge: launchGated ? null : challenge,
+      challenges: launchGated ? [] : challenges,
+      nextPublishAt: launchGated ? null : nextPublishAt,
+      progress,
+      // The leaderboard endpoint has always been closed with the gate; keep
+      // that parity so a pre-launch response carries no cohort data.
+      leaderboard: launchGated ? [] : leaderboard,
+      admin,
+    });
+  } catch (bootstrapError) {
+    console.error("bootstrap_failed", profileId, bootstrapError);
+    return res.status(503).json({ error: "bootstrap_unavailable" });
   }
 });
 

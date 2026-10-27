@@ -1,6 +1,8 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import { Challenge } from "./types.js";
 import { pointsForCompletion } from "./store.js";
+import { cached, invalidate } from "./cache.js";
 
 const url = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -20,8 +22,41 @@ export type ClaimedJob = {
   attempts: number;
 };
 
+// Validating an access token is a round trip to Supabase Auth. The dashboard
+// used to pay for one of those per request. Caching the verdict for a few
+// seconds collapses the burst (bootstrap, realtime resync, tab focus) into a
+// single call, while still expiring fast enough that a revoked session stops
+// working promptly.
+const TOKEN_TTL_MS = 30_000;
+const REJECTED_TOKEN_TTL_MS = 5_000;
+const tokenCache = new Map<string, { userId: string | null; expiresAt: number }>();
+const tokenInFlight = new Map<string, Promise<string | null>>();
+
 export async function userIdFromAccessToken(token?: string) {
   if (!db || !token) return null;
+  // Don't keep bearer tokens in memory; the hash is only a cache key.
+  const key = createHash("sha256").update(token).digest("base64url");
+  const cachedToken = tokenCache.get(key);
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.userId;
+  const pending = tokenInFlight.get(key);
+  if (pending) return pending;
+
+  const request = resolveAccessToken(token)
+    .then((userId) => {
+      if (tokenCache.size > 5_000) {
+        const now = Date.now();
+        for (const [entryKey, entry] of tokenCache) if (entry.expiresAt <= now) tokenCache.delete(entryKey);
+      }
+      tokenCache.set(key, { userId, expiresAt: Date.now() + (userId ? TOKEN_TTL_MS : REJECTED_TOKEN_TTL_MS) });
+      return userId;
+    })
+    .finally(() => tokenInFlight.delete(key));
+  tokenInFlight.set(key, request);
+  return request;
+}
+
+async function resolveAccessToken(token: string) {
+  if (!db) return null;
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) return null;
   const user = data.user;
@@ -68,6 +103,7 @@ export async function updatePersistentProfile(profileId: string, updates: { name
   if (!db) return null;
   const { data, error } = await db.from("profiles").upsert({ id: profileId, ...updates }, { onConflict: "id" }).select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").single();
   if (error) throw error;
+  invalidate("leaderboard");
   return data;
 }
 
@@ -88,6 +124,13 @@ function mapChallenge(data: { id: string; day: number; title: string; slug: stri
 }
 
 export async function getPersistentCurrentChallenge() {
+  // Five seconds is enough to collapse the burst from a page load without
+  // making the midnight rollover feel late. The student's tab also schedules a
+  // refresh at the exact boundary, and admin edits invalidate this key.
+  return cached("challenges:current", 5_000, readCurrentChallenge);
+}
+
+async function readCurrentChallenge() {
   if (!db) return null;
   const now = new Date().toISOString();
   // Prefer the lowest-numbered day that is currently inside its window. This
@@ -111,10 +154,28 @@ export async function getPersistentChallenge(challengeId: string) {
 }
 
 export async function getPersistentChallenges() {
+  return cached("challenges:list", 30_000, readChallenges);
+}
+
+async function readChallenges() {
   if (!db) return [];
   const { data, error } = await db.from("challenges").select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").lte("published_at", new Date().toISOString()).order("day", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((item) => ({ id: item.id, day: item.day, title: item.title, slug: item.slug, difficulty: item.difficulty, topic: item.topic, points: item.points, publishedAt: item.published_at, deadlineAt: item.deadline_at, verificationQueuedAt: item.verification_queued_at }));
+}
+
+/**
+ * The next scheduled publish, so the browser can refresh exactly when a new
+ * question goes live instead of polling. Null when the cohort has no
+ * future-dated question yet (the admin adds them by hand).
+ */
+export async function getNextChallengePublishAt() {
+  return cached("challenges:next", 15_000, async () => {
+    if (!db) return null;
+    const { data, error } = await db.from("challenges").select("published_at").gt("published_at", new Date().toISOString()).order("published_at", { ascending: true }).limit(1).maybeSingle();
+    if (error) throw error;
+    return (data?.published_at as string | undefined) ?? null;
+  });
 }
 
 export async function getPersistentProgress(profileId: string) {
@@ -202,10 +263,20 @@ export async function recalculateProfileStreak(profileId: string) {
   const { current, longest } = summarizeStreakDays(days, activeDay);
   const { error: updateError } = await db.from("profiles").update({ streak: current, longest_streak: longest }).eq("id", profileId);
   if (updateError) throw updateError;
+  invalidate("leaderboard");
   return { current, longest };
 }
 
 export async function getPersistentLeaderboard(query: string) {
+  const normalized = query.trim();
+  // The unfiltered board is the same for every student and is requested on
+  // every page load, so a few seconds of caching removes the whole-table scan
+  // from most requests. Search results are one-off; skip the cache for them.
+  if (normalized) return readLeaderboard(normalized);
+  return cached("leaderboard", 8_000, () => readLeaderboard(""));
+}
+
+async function readLeaderboard(query: string) {
   if (!db) return null;
   let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").order("points", { ascending: false }).order("streak", { ascending: false });
   const safeQuery = query.replace(/[,%()]/g, "");
@@ -529,6 +600,7 @@ export async function createAdminChallenge(input: { day: number; title: string; 
   if (slugTaken) throw new Error("slug_taken");
   const { data, error } = await db.from("challenges").insert(input).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
   if (error) throw error;
+  invalidate("challenges");
   return data;
 }
 
@@ -550,6 +622,13 @@ export type CohortResetResult = {
 };
 
 export async function getSiteSettings(): Promise<SiteSettings> {
+  // Settings gate the whole dashboard and are read by several helpers per
+  // request (launchOpen, bootstrap). They change only from the admin panel,
+  // which invalidates this key.
+  return cached("settings", 30_000, readSiteSettings);
+}
+
+async function readSiteSettings(): Promise<SiteSettings> {
   const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null, sprintStartedAt: null };
   if (!db) return defaults;
   const { data, error } = await db.from("site_settings").select("key,value");
@@ -576,6 +655,7 @@ export async function updateSiteSettings(patch: { waitlistEnabled?: boolean; mes
     const { error } = await db.from("site_settings").upsert({ key: row.key, value: row.value, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (error) throw error;
   }
+  invalidate("settings");
   return getSiteSettings();
 }
 
@@ -632,6 +712,9 @@ export async function launchFirstChallenge(): Promise<LaunchResult> {
   ], { onConflict: "key" });
   if (markerError) throw markerError;
 
+  invalidate("settings");
+  invalidate("challenges");
+  invalidate("leaderboard");
   return { started: true, challengeId: challenge.id, day: challenge.day, publishedAt, deadlineAt, updatedCompletions, updatedProfiles: profileIds.length };
 }
 
@@ -639,6 +722,7 @@ export async function resetCohort(): Promise<CohortResetResult> {
   if (!db) throw new Error("persistence_not_configured");
   const { data, error } = await db.rpc("reset_cohort");
   if (error) throw error;
+  invalidate();
   return data as CohortResetResult;
 }
 
@@ -664,6 +748,8 @@ export async function updateAdminChallenge(challengeId: string, updates: AdminCh
   if (Date.parse(deadlineAt) <= Date.parse(publishedAt)) throw new Error("deadline_must_be_after_publish");
   const { data, error } = await db.from("challenges").update(updates).eq("id", challengeId).select("id,day,title,slug,difficulty,topic,points,published_at,deadline_at,verification_queued_at").single();
   if (error) throw error;
+  invalidate("challenges");
+  invalidate("leaderboard");
   return data;
 }
 
@@ -713,6 +799,8 @@ export async function deleteAdminChallenge(challengeId: string): Promise<DeleteA
     }
   }
 
+  invalidate("challenges");
+  invalidate("leaderboard");
   return {
     deleted: true,
     challenge,
@@ -727,6 +815,7 @@ export async function reorderAdminChallenges(order: string[]) {
   if (!db) return;
   const { error } = await db.rpc("admin_reorder_challenges", { p_order: order.map((id) => ({ id })) });
   if (error) throw error;
+  invalidate("challenges");
 }
 
 export async function preparePersistentVerification(profileId: string, challengeId: string) {
@@ -748,6 +837,7 @@ export async function manuallyVerifyPersistentCompletion(profileId: string, chal
   const { data, error } = await db.rpc("finalize_verified_completion", { p_job_id: job.id, p_profile_id: profileId, p_challenge_id: challengeId, p_submission_id: submissionId, p_submission_at: submissionAt, p_awarded_points: awardedPoints, p_evidence: { source: "admin_manual_verification", submissionId } });
   if (error) throw error;
   if (data) await recalculateProfileStreak(profileId).catch((streakError) => console.error("streak_recalculation_failed", profileId, streakError));
+  invalidate("leaderboard");
   return { changed: Boolean(data), awardedPoints };
 }
 
@@ -857,5 +947,6 @@ export async function markPersistentVerified(job: ClaimedJob, submissionId: stri
   });
   if (error) throw error;
   if (data) await recalculateProfileStreak(job.profile_id).catch((streakError) => console.error("streak_recalculation_failed", job.profile_id, streakError));
+  invalidate("leaderboard");
   return Boolean(data);
 }

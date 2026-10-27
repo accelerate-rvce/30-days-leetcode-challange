@@ -10,6 +10,7 @@ import { Metric } from "./Metric";
 import type { AdminChallenge, AdminCompletion, AdminJob, AdminLog, AdminMetrics, AdminOverview, AdminUser, Challenge, LeaderboardRow, Progress, SiteSettings } from "./dashboard-types";
 import ParticleText from "./ParticleText";
 import { playVerifiedSound, unlockVerifiedSound } from "../lib/verified-sound";
+import { clearDashboardSnapshot, readDashboardSnapshot, readSettingsCache, writeDashboardSnapshot, writeSettingsCache } from "../lib/dashboard-cache";
 
 const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
   ssr: false,
@@ -64,6 +65,50 @@ async function fetchSiteSettings(api: string, signal?: AbortSignal): Promise<Sit
     throw new Error("invalid_settings");
   }
   return { waitlistEnabled: body.waitlistEnabled, message: body.message, launchAt: body.launchAt ?? null, sprintStartedAt: body.sprintStartedAt ?? null };
+}
+
+type DashboardPayload = {
+  settings?: SiteSettings | null;
+  challenge: Challenge | null;
+  challenges: Challenge[];
+  nextPublishAt?: string | null;
+  progress: Progress | null;
+  leaderboard: LeaderboardRow[];
+  admin?: AdminOverview | null;
+};
+
+// Everything the dashboard needs in one round trip: settings, the challenge
+// window, progress, the leaderboard, and (for admins) the monitoring panels.
+async function fetchDashboard(api: string, token: string): Promise<DashboardPayload> {
+  const headers = { Authorization: `Bearer ${token}` };
+  const response = await fetch(`${api}/api/bootstrap`, { headers, cache: "no-store" });
+  // A rolling deploy can leave the new frontend talking to an older backend.
+  // Fall back to the per-resource endpoints rather than breaking the page.
+  if (response.status === 404 || response.status === 405) return fetchDashboardLegacy(api, token);
+  if (!response.ok) throw new Error(`bootstrap_${response.status}`);
+  return await response.json() as DashboardPayload;
+}
+
+async function fetchDashboardLegacy(api: string, token: string): Promise<DashboardPayload> {
+  const headers = { Authorization: `Bearer ${token}` };
+  const [challengeResponse, progressResponse, leaderboardResponse, challengesResponse] = await Promise.all([
+    fetch(`${api}/api/challenges/current`, { headers }),
+    fetch(`${api}/api/progress`, { headers }),
+    fetch(`${api}/api/leaderboard`, { headers }),
+    fetch(`${api}/api/challenges`, { headers }),
+  ]);
+  const launchGated = challengeResponse.status === 403;
+  if (!challengeResponse.ok && !launchGated) throw new Error("challenge_unavailable");
+  const challengeBody = launchGated ? { challenge: null } : await challengeResponse.json() as { challenge: Challenge | null };
+  const progress = progressResponse.ok ? await progressResponse.json() as Progress : null;
+  const leaderboard = leaderboardResponse.ok ? (await leaderboardResponse.json() as { rows: LeaderboardRow[] }).rows ?? [] : [];
+  const challenges = challengesResponse.ok ? (await challengesResponse.json() as { challenges: Challenge[] }).challenges ?? [] : [];
+  let admin: AdminOverview | null = null;
+  if (progress?.profile.role === "admin") {
+    const adminResponse = await fetch(`${api}/api/admin/overview`, { headers });
+    if (adminResponse.ok) admin = await adminResponse.json() as AdminOverview;
+  }
+  return { challenge: challengeBody.challenge ?? null, challenges: launchGated ? [] : challenges, progress, leaderboard, admin, settings: null, nextPublishAt: null };
 }
 
 function useGridSpotlight() {
@@ -187,7 +232,91 @@ export default function ChallengeApp() {
   }, []);
   const api = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:4000").replace(/\/+$/, "");
   const token = session?.access_token;
+  const currentUserId = session?.user.id ?? null;
+  // The next scheduled publish (or the current deadline), so the tab can
+  // refresh exactly when the question changes instead of polling.
+  const [nextPublishAt, setNextPublishAt] = useState<string | null>(null);
+  const loadRequest = useRef(0);
+  const lastLoadedAt = useRef(0);
+  const selectedChallengeRef = useRef("");
+  // Attempts written from this tab that the next progress read may not have
+  // seen yet. They keep "Check Now" enabled right after pressing the button.
+  const pendingAttempts = useRef<Set<string>>(new Set());
   useGridSpotlight();
+
+  useEffect(() => { selectedChallengeRef.current = selectedChallengeId; }, [selectedChallengeId]);
+
+  // One place turns an API payload into state, so the cached snapshot and a
+  // live response render identically.
+  const applyDashboard = useCallback((payload: DashboardPayload) => {
+    if (payload.settings) {
+      setSiteSettings(payload.settings);
+      writeSettingsCache(payload.settings);
+      setSettingsLoading(false);
+      setSettingsError("");
+    }
+    if (payload.progress) {
+      setProgress(payload.progress);
+      setIsAdmin(payload.progress.profile.role === "admin");
+      setLeetcodeHandle(payload.progress.profile.leetcode_username ?? "");
+      setWaitlistName(payload.progress.profile.name ?? "");
+      setAcademicYear(payload.progress.profile.academic_year && payload.progress.profile.academic_year !== "First Year" ? payload.progress.profile.academic_year : "Second Year");
+    }
+    setChallenge(payload.challenge ?? null);
+    const list = payload.challenges ?? [];
+    setChallenges(list);
+    setNextPublishAt(payload.nextPublishAt ?? null);
+    if (payload.leaderboard) setLeaderboard(payload.leaderboard);
+    if (payload.admin) {
+      setAdminMetrics(payload.admin.metrics);
+      setAdminChallenges(payload.admin.challenges);
+      setAdminUsers(payload.admin.users);
+      setAdminJobs(payload.admin.jobs);
+      setAdminCompletions(payload.admin.completions ?? []);
+      setAdminLogs(payload.admin.logs);
+    }
+    // Keep the student on the question they are looking at, but recover if it
+    // no longer exists.
+    const current = selectedChallengeRef.current;
+    const nextSelected = current && list.some((item) => item.id === current) ? current : (payload.challenge?.id ?? list[0]?.id ?? "");
+    setSelectedChallengeId(nextSelected);
+    if (nextSelected && payload.progress) {
+      // The flag follows the selected question, so opening an older challenge
+      // never inherits another one's state. A just-recorded attempt survives
+      // the read that has not caught up with the write yet.
+      const hasAttempt = pendingAttempts.current.has(nextSelected) || payload.progress.statuses.some((item) => item.challenge_id === nextSelected);
+      setAttemptRecorded(hasAttempt);
+    }
+  }, []);
+
+  const loadDashboard = useCallback(async (mode: "initial" | "background" = "background") => {
+    if (!token || !currentUserId) return;
+    const request = ++loadRequest.current;
+    if (mode === "initial") { setLoading(true); setError(""); }
+    try {
+      const payload = await fetchDashboard(api, token);
+      if (request !== loadRequest.current) return;
+      applyDashboard(payload);
+      lastLoadedAt.current = Date.now();
+      writeDashboardSnapshot(currentUserId, {
+        savedAt: Date.now(),
+        challenge: payload.challenge ?? null,
+        challenges: payload.challenges ?? [],
+        nextPublishAt: payload.nextPublishAt ?? null,
+        progress: payload.progress,
+        leaderboard: payload.leaderboard ?? [],
+        admin: payload.admin ?? null,
+      });
+      setError("");
+      setLoading(false);
+    } catch {
+      if (request !== loadRequest.current) return;
+      // With a cached dashboard already on screen a failed revalidation is
+      // silent; only a cold load needs the error screen.
+      if (mode === "initial") setError("We couldn’t load the live challenge data. Try again shortly.");
+      setLoading(false);
+    }
+  }, [api, applyDashboard, currentUserId, token]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIntroComplete(true), 2400);
@@ -238,6 +367,16 @@ export default function ChallengeApp() {
   useEffect(() => {
     let active = true;
     let inFlight = false;
+    // The gate is public data and almost never changes; a cached copy lets a
+    // repeat visit render the dashboard before the network answers.
+    const cached = readSettingsCache();
+    if (cached) {
+      // Same external-store exception as the dashboard snapshot below: paint
+      // the cached gate once, then correct it from the network.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSiteSettings(cached);
+      setSettingsLoading(false);
+    }
     const loadSettings = async () => {
       if (inFlight) return;
       inFlight = true;
@@ -247,6 +386,7 @@ export default function ChallengeApp() {
         const next = await fetchSiteSettings(api, controller.signal);
         if (!active) return;
         setSiteSettings(next);
+        writeSettingsCache(next);
         setSettingsError("");
       } catch {
         // Keep the last known settings during a transient poll failure, but
@@ -259,11 +399,12 @@ export default function ChallengeApp() {
       }
     };
     void loadSettings();
-    // Keep the waitlist gate fresh while the tab is visible. Polling pauses in
-    // the background and refreshes immediately when the user returns.
+    // Refresh the waitlist gate on return and occasionally while visible.
+    // Five minutes is plenty for an admin toggle; the bootstrap response also
+    // carries a fresh copy, so this is only a backstop.
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadSettings();
-    }, 60_000);
+    }, 5 * 60_000);
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") void loadSettings();
     };
@@ -275,69 +416,49 @@ export default function ChallengeApp() {
     };
   }, [api, settingsRetry]);
 
+  // Initial paint: a cached snapshot renders instantly, then a single
+  // /bootstrap request revalidates it. Without a snapshot the same call is the
+  // first load. Note there is deliberately no dependency on the settings value
+  // here — that used to re-run this effect and double the initial fetches.
   useEffect(() => {
-    if (authLoading || !token) return;
-    const load = async () => {
-      setLoading(true); setError("");
-      try {
-        const headers = { Authorization: `Bearer ${token}` };
-        const [challengeResponse, progressResponse, leaderboardResponse, challengesResponse] = await Promise.all([
-          fetch(`${api}/api/challenges/current`, { headers }),
-          fetch(`${api}/api/progress`, { headers }),
-          fetch(`${api}/api/leaderboard`, { headers }),
-          fetch(`${api}/api/challenges`, { headers }),
-        ]);
-        const launchGated = challengeResponse.status === 403;
-        if (!challengeResponse.ok && !launchGated) throw new Error("challenge_unavailable");
-        const challengeBody = launchGated ? { challenge: null } : await challengeResponse.json() as { challenge: Challenge | null };
-        setChallenge(challengeBody.challenge);
-        if (progressResponse.ok) {
-          const nextProgress = await progressResponse.json() as Progress;
-          setProgress(nextProgress);
-          setIsAdmin(nextProgress.profile.role === "admin");
-          setLeetcodeHandle(nextProgress.profile.leetcode_username ?? "");
-          setWaitlistName(nextProgress.profile.name ?? "");
-          setAcademicYear(nextProgress.profile.academic_year && nextProgress.profile.academic_year !== "First Year" ? nextProgress.profile.academic_year : "Second Year");
-          setAttemptRecorded(nextProgress.statuses.some((item) => item.challenge_id === challengeBody.challenge?.id));
-          if (nextProgress.profile.role === "admin") {
-            const adminResponse = await fetch(`${api}/api/admin/overview`, { headers });
-            if (adminResponse.ok) {
-              const overview = await adminResponse.json() as AdminOverview;
-              setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminCompletions(overview.completions ?? []); setAdminLogs(overview.logs);
-            }
-          }
-        }
-        if (leaderboardResponse.ok) setLeaderboard((await leaderboardResponse.json() as { rows: LeaderboardRow[] }).rows ?? []);
-        if (challengesResponse.ok) { const list = (await challengesResponse.json() as { challenges: Challenge[] }).challenges ?? []; setChallenges(list); setSelectedChallengeId(challengeBody.challenge?.id ?? list[0]?.id ?? ""); }
-      } catch { setError("We couldn’t load the live challenge data. Try again shortly."); }
-      finally { setLoading(false); }
-    };
-    void load();
-  }, [api, authLoading, token, siteSettings?.waitlistEnabled]);
+    if (authLoading || !token || !currentUserId) return;
+    const snapshot = readDashboardSnapshot(currentUserId);
+    if (snapshot) {
+      // Hydrating from the local snapshot is the point of an effect here: the
+      // cache is an external store, it is read once on mount, and the live
+      // request immediately corrects it.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      applyDashboard(snapshot);
+      setLoading(false);
+      void loadDashboard("background");
+      return;
+    }
+    void loadDashboard("initial");
+  }, [applyDashboard, authLoading, currentUserId, loadDashboard, token]);
 
   const realtimeProfileId = session?.user.id ?? null;
 
   // One long-lived channel per signed-in student. RLS already limits
   // `completions` to the caller's own rows, and the filter narrows the stream to
   // this profile, so the browser never receives another student's writes.
+  // `challenges` is public data: a new publish (or an admin edit) is pushed to
+  // every open tab, which is what removes polling around the publish time.
   useEffect(() => {
     if (!supabase || !realtimeProfileId || !token) return;
     const client = supabase;
-    const headers = { Authorization: `Bearer ${token}` };
-    let disposed = false;
-
-    const sync = async () => {
-      const [progressResponse, leaderboardResponse] = await Promise.all([
-        fetch(`${api}/api/progress`, { headers }).catch(() => null),
-        fetch(`${api}/api/leaderboard`, { headers }).catch(() => null),
-      ]);
-      if (disposed) return;
-      if (progressResponse?.ok) setProgress(await progressResponse.json() as Progress);
-      if (leaderboardResponse?.ok) setLeaderboard((await leaderboardResponse.json() as { rows: LeaderboardRow[] }).rows ?? []);
+    // A burst of rows (admin edits, a verification writing a job and then a
+    // completion) should produce one refresh, not one per row.
+    let pendingRefresh = 0;
+    const refreshSoon = () => {
+      if (pendingRefresh) return;
+      pendingRefresh = window.setTimeout(() => {
+        pendingRefresh = 0;
+        void loadDashboard("background");
+      }, 350);
     };
 
     const channel = client
-      .channel(`completions:${realtimeProfileId}`)
+      .channel(`dashboard:${realtimeProfileId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "completions", filter: `profile_id=eq.${realtimeProfileId}` }, (payload) => {
         const row = payload.new as { challenge_id?: string; status?: string; awarded_points?: number | null } | undefined;
         if (!row?.challenge_id || !row.status) return;
@@ -357,21 +478,58 @@ export default function ChallengeApp() {
             setVerifyMessage("No accepted submission found for this problem yet. Solve it on LeetCode, then press Check Now again.");
           }
         }
-        void sync();
+        refreshSoon();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "challenges" }, refreshSoon)
       .subscribe((status) => {
         // Fires on first connect and again after every reconnect. Re-reading
         // here recovers anything missed while the socket was down.
-        if (status === "SUBSCRIBED") void sync();
+        if (status === "SUBSCRIBED") void loadDashboard("background");
       });
 
     return () => {
-      disposed = true;
+      if (pendingRefresh) window.clearTimeout(pendingRefresh);
       // Leave pendingCheck alone: a token refresh re-runs this effect, and the
       // in-flight check should still be resolved by the reconnected channel.
       void client.removeChannel(channel);
     };
-  }, [api, celebrate, realtimeProfileId, token]);
+  }, [celebrate, loadDashboard, realtimeProfileId, token]);
+
+  // Refresh exactly when the question window changes: at the current
+  // deadline, or when the next challenge is scheduled to publish. The timer is
+  // clamped to six hours and re-armed on every refresh, so a laptop waking
+  // from sleep still catches up without a polling loop.
+  useEffect(() => {
+    if (!token) return;
+    const now = Date.now();
+    const boundary = [challenge?.deadlineAt, nextPublishAt]
+      .map((value) => (value ? Date.parse(value) : NaN))
+      .filter((value) => Number.isFinite(value) && value > now)
+      .sort((left, right) => left - right)[0];
+    if (!boundary) return;
+    const delay = Math.min(Math.max(boundary - Date.now() + 2_000, 5_000), 6 * 60 * 60_000);
+    const timer = window.setTimeout(() => void loadDashboard("background"), delay);
+    return () => window.clearTimeout(timer);
+  }, [challenge?.deadlineAt, loadDashboard, nextPublishAt, token]);
+
+  // Coming back to a stale tab (phone unlocked, laptop reopened) should show
+  // the current question without a manual reload.
+  useEffect(() => {
+    if (!token) return;
+    const refreshIfStale = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLoadedAt.current < 60_000) return;
+      void loadDashboard("background");
+    };
+    document.addEventListener("visibilitychange", refreshIfStale);
+    window.addEventListener("focus", refreshIfStale);
+    window.addEventListener("online", refreshIfStale);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshIfStale);
+      window.removeEventListener("focus", refreshIfStale);
+      window.removeEventListener("online", refreshIfStale);
+    };
+  }, [loadDashboard, token]);
 
   useEffect(() => {
     if (session && progress && view === "admin" && progress.profile.role !== "admin") router.replace("/");
@@ -388,7 +546,7 @@ export default function ChallengeApp() {
     if (!supabase) return;
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) setError("Couldn’t sign you out. Please try again.");
-    else { setSession(null); setProgress(null); setChallenge(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminCompletions([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("welcome"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
+    else { if (currentUserId) clearDashboardSnapshot(currentUserId); pendingAttempts.current.clear(); setSession(null); setProgress(null); setChallenge(null); setChallenges([]); setNextPublishAt(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminCompletions([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("welcome"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
   }
 
   async function recordAndSolve() {
@@ -408,6 +566,7 @@ export default function ChallengeApp() {
     try {
       const response = await fetch(`${api}/api/events/open`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ challengeId: selectedChallenge.id }) });
       if (!response.ok) throw new Error("attempt_record_failed");
+      pendingAttempts.current.add(selectedChallenge.id);
       setAttemptRecorded(true);
       if (leetcodeTab && !leetcodeTab.closed) {
         try { leetcodeTab.location.replace(leetcodeUrl); }
@@ -530,7 +689,7 @@ export default function ChallengeApp() {
   if (siteSettings?.waitlistEnabled && !isAdmin && !session) return <LaunchWaitlist message={siteSettings.message} launchAt={siteSettings.launchAt} onSignIn={signIn} error={error} />;
   if (!session) {
     if (onboardingStage === "welcome") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content welcome-content"><p className="onboarding-kicker">WELCOME, RVIANS</p><h1>Make a habit of solving.</h1><p className="onboarding-copy">Accelerate Club invites you to a focused 30-day LeetCode challenge for RVCE students.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-action" onClick={() => setOnboardingStage("briefing")}>See how the challenge works <span>→</span></button><a className="whatsapp-link" href={whatsappGroupUrl} target="_blank" rel="noreferrer">Join the cohort WhatsApp group <span>↗</span></a></div></section></main>;
-    if (onboardingStage === "briefing") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">THE FORMAT</p><h1>One question. Every day.</h1><div className="briefing-list"><div><b>01</b><p>A new challenge is published daily at 6:00 PM IST.</p></div><div><b>02</b><p>Solve on LeetCode and let the backend verify your accepted submission.</p></div><div><b>03</b><p>Earn 100 points on time or 70 points late, once per challenge.</p></div></div><div className="onboarding-actions"><button className="secondary-button" onClick={() => setOnboardingStage("welcome")}>Back</button><button className="primary-button" onClick={() => setOnboardingStage("signin")}>Continue <span>→</span></button></div></div></section></main>;
+    if (onboardingStage === "briefing") return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">THE FORMAT</p><h1>One question. Every day.</h1><div className="briefing-list"><div><b>01</b><p>A new challenge is published daily at 12:00 AM IST.</p></div><div><b>02</b><p>Solve on LeetCode and let the backend verify your accepted submission.</p></div><div><b>03</b><p>Earn 100 points on time or 70 points late, once per challenge.</p></div></div><div className="onboarding-actions"><button className="secondary-button" onClick={() => setOnboardingStage("welcome")}>Back</button><button className="primary-button" onClick={() => setOnboardingStage("signin")}>Continue <span>→</span></button></div></div></section></main>;
     return <main className="onboarding-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">RVCE STUDENTS ONLY</p><h1>Use your college Google account.</h1><p className="onboarding-copy">Sign in with your <code>@rvce.edu.in</code> account to continue. We’ll ask for your LeetCode username next.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="google-button" onClick={signIn}><span aria-hidden="true">G</span> Continue with Google</button><button className="text-button onboarding-back" onClick={() => setOnboardingStage("briefing")}>Back to challenge details</button></div></section></main>;
   }
   if (loading) return <LoadingScreen label="Loading your challenge data…" />;
@@ -556,7 +715,7 @@ export default function ChallengeApp() {
 
 function ChallengeCard({ challenge, onOpen }: { challenge: Challenge | null; onOpen: () => void }) { return <article className="panel challenge-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY’S QUESTION {challenge && <span className="muted">· DAY {String(challenge.day).padStart(2, "0")}</span>}</div><h2>{challenge?.title ?? "No challenge published"}</h2></div>{challenge && <span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()}</span>}</div>{challenge ? <><div className="problem-meta"><span><b>{challenge.slug.toUpperCase()}</b> PROBLEM ID</span><span><b>{challenge.points} PTS</b> AVAILABLE</span><span><b>{formatTime(challenge.deadlineAt)} IST</b> DEADLINE</span></div><p className="challenge-privacy-note">Before you submit, turn on “Display my submission history” in <a href="https://leetcode.com/profile/privacy/" target="_blank" rel="noreferrer">LeetCode privacy settings</a>.</p><button className="primary-button" onClick={onOpen}>Open question <span>→</span></button></> : <p className="empty-copy">The next challenge will appear here when it is published.</p>}</article>; }
 function ChallengeHistory({ challenges, currentChallenge, onSelect }: { challenges: Challenge[]; currentChallenge: Challenge | null; onSelect: (id: string) => void }) { const currentDay = currentChallenge?.day ?? 31; const past = challenges.filter((item) => item.id !== currentChallenge?.id && item.day < currentDay); return <article className="panel activity-panel"><div className="eyebrow">CHALLENGE HISTORY</div><h2>Complete a missed challenge</h2>{past.length === 0 ? <p className="empty-copy">No earlier challenges are available.</p> : <div className="activity-list">{past.map((item) => <div className="activity-row" key={item.id}><span className="question-day">DAY {String(item.day).padStart(2, "0")}</span><div><strong>{item.title}</strong><p>Late completion · 70 points</p></div><button className="text-button" onClick={() => onSelect(item.id)}>Open →</button></div>)}</div>}</article>; }
-function StreakTracker({ challenges, progress, currentChallenge }: { challenges: Challenge[]; progress: Progress | null; currentChallenge: Challenge | null }) { const completedDays = new Set((progress?.statuses ?? []).filter((item) => item.status === "verified").map((item) => challenges.find((challenge) => challenge.id === item.challenge_id)?.day).filter((day): day is number => typeof day === "number")); return <article className="panel tracker-panel"><div className="panel-heading"><div><div className="eyebrow">STREAK TRACKER</div><h2>30 days in motion</h2></div><span className="tracker-count">{progress?.profile.streak ?? 0} <small>/ 30</small></span></div><div className="day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; return <span key={day} className={completedDays.has(day) ? "complete" : currentChallenge?.day === day ? "today" : ""}>{String(day).padStart(2, "0")}</span>; })}</div><div className="tracker-foot"><span><span className="legend complete" /> verified</span><span><span className="legend today" /> current</span><span>next challenge at 18:00 IST</span></div></article>; }
+function StreakTracker({ challenges, progress, currentChallenge }: { challenges: Challenge[]; progress: Progress | null; currentChallenge: Challenge | null }) { const completedDays = new Set((progress?.statuses ?? []).filter((item) => item.status === "verified").map((item) => challenges.find((challenge) => challenge.id === item.challenge_id)?.day).filter((day): day is number => typeof day === "number")); return <article className="panel tracker-panel"><div className="panel-heading"><div><div className="eyebrow">STREAK TRACKER</div><h2>30 days in motion</h2></div><span className="tracker-count">{progress?.profile.streak ?? 0} <small>/ 30</small></span></div><div className="day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; return <span key={day} className={completedDays.has(day) ? "complete" : currentChallenge?.day === day ? "today" : ""}>{String(day).padStart(2, "0")}</span>; })}</div><div className="tracker-foot"><span><span className="legend complete" /> verified</span><span><span className="legend today" /> current</span><span>next challenge at 00:00 IST</span></div></article>; }
 function ChallengeDetail({ challenge, attemptRecorded, recording, verifying, verifyMessage, verificationStatus, awardedPoints, onSolve, onVerify }: { challenge: Challenge | null; attemptRecorded: boolean; recording: boolean; verifying: boolean; verifyMessage: string; verificationStatus: string | null; awardedPoints?: number; onSolve: () => void; onVerify: () => void }) { const now = useNow(); if (!challenge) return <EmptyPanel title="No challenge published" copy="There is no active challenge in the live database." />; const isVerified = verificationStatus === "verified"; return <section className="challenge-detail-layout"><article className="panel challenge-detail"><div className="eyebrow"><span className="accent-dot" /> DAY {String(challenge.day).padStart(2, "0")} · PUBLISHED {formatTime(challenge.publishedAt)} IST</div><div className="detail-title-row"><div><h2>{challenge.title}</h2><p className="slug">leetcode.com/problems/{challenge.slug}</p></div><span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()} · {challenge.points} PTS</span></div>{!isVerified && <div className="verification-callout"><strong>Before you submit</strong><p>Curate your profile – control what opens to the public. <a href="https://leetcode.com/profile/privacy/" target="_blank" rel="noreferrer">Recent AC Problems and Submission Details</a> must be visible. <span className="on">On</span> includes your Submission Heatmap. If these are hidden, we cannot see your accepted submissions and cannot award points.</p></div>}<div className="detail-actions"><button className="primary-button" onClick={onSolve} disabled={recording}>{recording ? "Recording…" : attemptRecorded ? "Open on LeetCode" : "Solve on LeetCode"} <span>↗</span></button>{attemptRecorded && !isVerified && <button className="secondary-button" onClick={onVerify} disabled={verifying}>{verifying ? "Checking…" : "Check Now"}</button>}<span className={isVerified ? "verification recorded" : attemptRecorded ? "verification recorded" : "verification"}>{isVerified ? `✓ VERIFIED +${awardedPoints ?? challenge.points} PTS` : attemptRecorded ? "✓ ATTEMPT RECORDED" : "○ NOT ATTEMPTED"}</span></div>{verifyMessage && <p className="empty-copy" role="status">{verifyMessage}</p>}{isVerified && <p className="empty-copy">1 accepted submission = points credited once. Re-submissions never award duplicates.</p>}</article><aside className="panel deadline-card"><div className="eyebrow">VERIFICATION WINDOW</div><div className="countdown" role="timer" aria-label="Time remaining until the deadline">{formatCountdown(challenge.deadlineAt, now)}</div><p>Deadline · {formatDate(challenge.deadlineAt)}</p><div className="status-list"><div><span className={attemptRecorded ? "status-dot" : "muted-dot"} /> Attempt recorded <b>{attemptRecorded ? "yes" : "pending"}</b></div><div><span className={isVerified ? "status-dot" : "muted-dot"} /> Submission check <b>{isVerified ? "verified" : "1 Accepted = points"}</b></div><div><span className="muted-dot" /> Points <b>{challenge.points} pts</b></div></div></aside></section>; }
 function mergeCompletionStatus(statuses: Progress["statuses"], row: { challenge_id: string; status: string; awarded_points?: number }) {
   const existing = statuses.find((item) => item.challenge_id === row.challenge_id);
@@ -598,7 +757,14 @@ function PodiumCard({ row, place }: { row: LeaderboardRow; place: "first" | "sec
 function Resources({ query, setQuery, filtered }: { query: string; setQuery: (value: string) => void; filtered: ReadonlyArray<typeof resources[number]> }) { return <section className="resources-page"><div className="resource-controls"><div><span className="resource-count">{filtered.length} resources</span><p>Each link opens in a new tab. Save the paths that fit your current weak spot.</p></div><label className="search-box resource-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search topics or source" aria-label="Search resources" /></label></div>{["DSA Roadmaps & Problem Sheets", "YouTube Learning Resources"].map((category) => { const items = filtered.filter((resource) => resource.category === category); return <section className="resource-section" key={category}><div className="resource-section-heading"><h2>{category}</h2><span>{items.length} listed</span></div>{items.length ? <div className="resource-grid">{items.map((resource) => <article className="resource-card" key={resource.title}><div className="resource-card-top"><span className={`resource-kind ${resource.href ? "" : "pending"}`}>{resource.kind}</span><span aria-hidden="true">{resource.href ? "↗" : "· · ·"}</span></div><h3>{resource.title}</h3><p>{resource.detail}</p>{resource.href ? <a href={resource.href} target="_blank" rel="noreferrer" className="resource-link">Open resource <span>↗</span></a> : <span className="resource-unavailable">Link pending verification</span>}</article>)}</div> : <div className="resource-empty"><strong>No resources match “{query}”.</strong><button className="text-button" onClick={() => setQuery("")}>Clear search</button></div>}</section>; })}</section>; }
 function Support() { return <section className="support-layout"><div className="support-main"><article className="panel support-card"><div className="panel-heading"><div><div className="eyebrow">01 // VERIFICATION SUPPORT</div><h2>Check a submission</h2></div><span className="mini-tag">LIVE RELAY</span></div><p>Need help with a challenge account or verification status? Send the challenge day, your LeetCode username, and the approximate submission time.</p>{supportEmails.length ? <div className="support-contact-grid">{supportEmails.map((email) => <a className="contact-person support-email" href={`mailto:${email}?subject=30DAYS%20verification%20support`} key={email}><div className="avatar">@</div><div><strong>{email}</strong><small>Open Gmail to send a query</small></div><span className="status-dot" /></a>)}</div> : <div className="resource-empty"><strong>Support contacts are not configured yet.</strong><span className="empty-copy">Set NEXT_PUBLIC_SUPPORT_EMAIL_ONE and NEXT_PUBLIC_SUPPORT_EMAIL_TWO.</span></div>}</article><article className="panel support-card"><div className="panel-heading"><div><div className="eyebrow">02 // COHORT SUPPORT DESK</div><h2>What to include in your query</h2></div><span className="mini-tag">EST. RESPONSE · 20M</span></div><div className="chip-row"><span className="chip selected">Submission not verified</span><span className="chip">Changed handle</span><span className="chip">Question clarification</span><span className="chip">Account error</span></div><p>Support can investigate your persisted attempt and verification evidence. Points are never changed from the browser.</p></article></div><aside className="support-side"><article className="panel health-card"><div className="panel-heading"><div><div className="eyebrow">LIVE INFRASTRUCTURE</div><h2>Operational</h2></div><span className="health-badge"><span className="status-dot" /> DATABASE</span></div><div className="sparkline"><i /><i /><i /><i /><i /><i /><i /><i /><i /></div><div className="health-row"><span>LeetCode verification</span><strong>async</strong></div><div className="health-row"><span>Point awards</span><strong>idempotent</strong></div><div className="health-row"><span>Support relay</span><strong>online</strong></div></article><article className="panel contact-card"><div className="eyebrow">SELECTED SUPPORT CONTACTS</div><h2>Live relay contacts</h2><p>Available to the cohort operations group during the active sprint window.</p>{supportEmails.length ? supportEmails.map((email) => <a className="contact-person support-email" href={`mailto:${email}?subject=30DAYS%20support%20query`} key={`side-${email}`}><div className="avatar small">@</div><div><strong>{email}</strong><small>Support relay</small></div><span className="status-dot" /></a>) : <p className="empty-copy">Configure the support addresses to show contacts.</p>}</article></aside></section>; }
 function EmptyPanel({ title, copy }: { title: string; copy: string }) { return <article className="panel empty-state"><h2>{title}</h2><p className="empty-copy">{copy}</p></article>; }
-function LoadingScreen({ label }: { label: string }) { return <main className="onboarding-shell"><section className="onboarding-card"><p className="onboarding-kicker">30DAYS</p><h1>{label}</h1></section></main>; }
+function LoadingScreen({ label }: { label: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), 6_000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return <main className="onboarding-shell"><section className="onboarding-card"><p className="onboarding-kicker">30DAYS</p><h1>{label}</h1>{slow && <p className="onboarding-copy">Still connecting. The challenge server may be waking up after being idle — this extra wait only happens once.</p>}</section></main>;
+}
 function LaunchWaitlist({ message, launchAt, onSignIn, error }: { message: string; launchAt: string | null; onSignIn: () => void; error?: string }) { return <main className="onboarding-shell coming-soon-shell"><div className="onboarding-grid" aria-hidden="true" /><section className="onboarding-card"><div className="onboarding-brand"><span className="onboarding-mark" aria-hidden="true"><AccelerateMark /></span><strong>ACCELERATE CLUB</strong><small>RV COLLEGE OF ENGINEERING</small></div><div className="onboarding-content"><p className="onboarding-kicker">SEASON 01 · REGISTRATIONS OPEN</p><h1>The first 30-day sprint starts soon.</h1><p className="onboarding-copy">{message || "A focused 30-day LeetCode sprint for RVCE students. Register with your college account to reserve your place before Day 1."}</p>{launchAt && <p className="onboarding-copy">Launch · {formatDate(launchAt)} IST</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="onboarding-actions"><button className="primary-button" onClick={onSignIn}>Register with Google <span>→</span></button></div><a className="whatsapp-link" href={whatsappGroupUrl} target="_blank" rel="noreferrer">Join the cohort WhatsApp group <span>↗</span></a><p className="onboarding-copy">RVCE students only · @rvce.edu.in account required.</p></div></section></main>; }
 function ComingSoon({ name, handle, academicYear, email, message, launchAt, onEdit, onSignOut }: { name: string; handle: string; academicYear: string; email: string; message: string; launchAt: string | null; onEdit: () => void; onSignOut: () => void }) {
   const [now, setNow] = useState(() => Date.now());
@@ -641,7 +807,7 @@ function ComingSoon({ name, handle, academicYear, email, message, launchAt, onEd
           </div>
           <div className="coming-soon-steps">
             <div><b>01</b><div><strong>Registration locked</strong><p>Your profile and LeetCode handle are on the cohort list.</p></div></div>
-            <div><b>02</b><div><strong>Dashboard unlocks</strong><p>One question drops each day at 6:00 PM IST once the sprint begins.</p></div></div>
+            <div><b>02</b><div><strong>Dashboard unlocks</strong><p>One question drops each day at 12:00 AM IST once the sprint begins.</p></div></div>
             <div><b>03</b><div><strong>Solve, verify, score</strong><p>One accepted submission per challenge awards points exactly once.</p></div></div>
           </div>
           <div className="onboarding-actions coming-soon-actions">

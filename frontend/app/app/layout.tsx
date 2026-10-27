@@ -29,12 +29,24 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  // Warm the TLS connection to the API before the first fetch. The dashboard
+  // fires its request only after auth resolves, so this hides most of the
+  // handshake on a cold or mobile connection.
+  let apiOrigin: string | null = null;
+  try {
+    const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+    if (configured) apiOrigin = new URL(configured).origin;
+  } catch {
+    apiOrigin = null;
+  }
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {apiOrigin && <link rel="preconnect" href={apiOrigin} crossOrigin="anonymous" />}
+        {apiOrigin && <link rel="dns-prefetch" href={apiOrigin} />}
         {children}
       </body>
     </html>
