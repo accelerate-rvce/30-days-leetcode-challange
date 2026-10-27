@@ -520,3 +520,25 @@ button.user-avatar { cursor: pointer; padding: 0; }
 .profile-form .primary-button { margin-top: 4px; width: 100%; }
 @media (max-width: 940px) { .profile-layout { grid-template-columns: 1fr; } }
 @media (max-width: 680px) { .profile-stats { grid-template-columns: repeat(2, 1fr); } }
+
+/* Leaderboard: the viewer's own standing, above the podium and repeated as a
+   highlighted row so it is visible even when they are on another page. */
+.my-rank { align-items: center; display: flex; gap: clamp(16px, 3vw, 34px); margin-top: 10px; padding: 16px clamp(16px, 2vw, 24px); }
+.my-rank-score { border-right: 1px solid var(--line); display: grid; gap: 3px; min-width: 148px; padding-right: clamp(16px, 3vw, 28px); }
+.my-rank-score .eyebrow { margin: 0; }
+.my-rank-score strong { color: var(--accent); font-family: var(--font-geist-mono); font-size: 30px; letter-spacing: -.05em; line-height: 1; }
+.my-rank-score small { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .04em; }
+.my-rank-person { flex: 1; }
+.my-rank-person strong { font-size: 15px; }
+.my-rank-person small { color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; }
+.my-rank-stats { display: flex; gap: clamp(14px, 2.4vw, 30px); }
+.my-rank-stats span { display: grid; gap: 4px; }
+.my-rank-stats b { color: #fff; font-family: var(--font-geist-mono); font-size: 17px; letter-spacing: -.03em; }
+.my-rank-stats small { color: var(--muted); font-family: var(--font-geist-mono); font-size: 8px; letter-spacing: .08em; }
+.my-rank-empty { color: var(--muted); font-size: 12px; margin: 0; }
+.ranking-panel table tr.my-row { background: rgba(34, 211, 238, .07); }
+.ranking-panel table tr.my-row td:first-child { border-left: 2px solid var(--accent); }
+.ranking-panel table tr.my-row .score-cell { color: var(--accent); }
+.ranking-panel td.rank-cell { align-items: center; display: flex; gap: 6px; }
+.you-tag { background: var(--accent); color: #031018; font-family: var(--font-geist-mono); font-size: 7px; font-weight: 700; letter-spacing: .08em; padding: 2px 4px; }
+@media (max-width: 680px) { .my-rank { align-items: flex-start; flex-direction: column; gap: 14px; } .my-rank-score { border-bottom: 1px solid var(--line); border-right: 0; padding: 0 0 12px; width: 100%; } .my-rank-stats { gap: 22px; } }

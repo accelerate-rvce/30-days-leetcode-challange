@@ -111,8 +111,8 @@ never double-score.
 
 ### Verification celebration
 
-When a completion flips to `verified`, the UI takes over the screen with a
-centred Rive mascot moment and plays a cinematic hit. Both are client-side only:
+When a completion flips to `verified`, two sounds play in order and then the UI
+takes over the screen with a centred Rive mascot. All of it is client-side only:
 
 - `frontend/app/components/Kabi.tsx` drives `/kabi.riv` (state machine `Kabi`,
   inputs `pose`, `mood`, `lookX`, `lookY`, `jump`). The celebration sets
@@ -120,10 +120,14 @@ centred Rive mascot moment and plays a cinematic hit. Both are client-side only:
   pointer (`lookX`/`lookY` accept -100..100). Drop the exported file at
   `frontend/app/public/kabi.riv`; until it exists the card renders a verified
   medallion instead of an empty canvas.
-- `frontend/app/public/sounds/verified-celebration.wav` is the sound. It is
-  unlocked by the Check Now click and played from the Realtime callback, with a
-  synthesized fallback if the file cannot be fetched. The overlay dismisses on
-  click, Escape, or after 12 seconds.
+- `frontend/app/public/sounds/verified-celebration.wav` is the confirmation
+  hit. It plays the moment the verdict lands, so it acts as the notification.
+- `frontend/app/public/sounds/verified-party.mp3` is the mascot music. The
+  overlay only appears once the hit has finished, then loops this track until
+  the student closes it (click, ×, or Escape).
+- Both files are decoded during the Check Now click (`unlockVerifiedSound`),
+  because browsers will not start audio from a websocket callback alone. The
+  hit falls back to a synthesized chime if the file cannot be fetched.
 
 Realtime requires migration `010_enable_realtime.sql`, which adds `completions`
 to the `supabase_realtime` publication. Row level security already limits each

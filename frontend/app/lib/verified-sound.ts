@@ -1,15 +1,32 @@
-// Verification chime.
+// Verification sounds.
+//
+// Two assets play in order:
+//   1. `verified-celebration.wav` — the short "verified" hit. It fires the
+//      moment the verdict is confirmed, before anything appears on screen.
+//   2. `verified-party.mp3` — the mascot moment's music, looped until the
+//      student closes the celebration overlay.
 //
 // The verdict arrives from a websocket callback, not a click, so the browser
-// needs the audio context unlocked while the "Check Now" gesture is still
-// fresh. `unlockVerifiedSound` runs in the click handler; `playVerifiedSound`
-// runs when the completion row flips to verified, seconds later.
+// needs the audio unlocked while the "Check Now" gesture is still fresh.
+// `unlockVerifiedSound` runs in the click handler and decodes both files;
+// `playVerifiedSound` / `startCelebrationMusic` run seconds later.
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
-const source = `${basePath}/sounds/verified-celebration.wav`;
+const tracks = {
+  hit: `${basePath}/sounds/verified-celebration.wav`,
+  party: `${basePath}/sounds/verified-party.mp3`,
+} as const;
+
+type Track = keyof typeof tracks;
 
 let context: AudioContext | null = null;
-let buffer: AudioBuffer | null = null;
-let preloading: Promise<void> | null = null;
+const buffers: Record<Track, AudioBuffer | null> = { hit: null, party: null };
+const preloads: Record<Track, Promise<void> | null> = { hit: null, party: null };
+let partyPlayback: AudioBufferSourceNode | null = null;
+let partyGain: GainNode | null = null;
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
 
 function getContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -21,44 +38,97 @@ function getContext(): AudioContext | null {
   return context;
 }
 
-function preload(ctx: AudioContext) {
-  if (preloading) return preloading;
-  preloading = fetch(source)
+function preload(track: Track, ctx: AudioContext) {
+  if (preloads[track]) return preloads[track];
+  preloads[track] = fetch(tracks[track])
     .then((response) => response.ok ? response.arrayBuffer() : Promise.reject(new Error(`sound_${response.status}`)))
     .then((data) => ctx.decodeAudioData(data))
-    .then((decoded) => { buffer = decoded; })
-    .catch(() => { buffer = null; });
-  return preloading;
+    .then((decoded) => { buffers[track] = decoded; })
+    .catch(() => { buffers[track] = null; });
+  return preloads[track];
+}
+
+// Wait for a decode that started on click, but never hold the celebration for
+// long: a missing asset just means that layer stays silent.
+async function bufferFor(ctx: AudioContext, track: Track) {
+  if (buffers[track]) return buffers[track];
+  await Promise.race([preload(track, ctx), delay(500)]);
+  return buffers[track];
+}
+
+async function runningContext(): Promise<AudioContext | null> {
+  const ctx = getContext();
+  if (!ctx) return null;
+  if (ctx.state === "suspended") {
+    try { await ctx.resume(); } catch { return null; }
+  }
+  return ctx.state === "running" ? ctx : null;
 }
 
 export function unlockVerifiedSound() {
   const ctx = getContext();
   if (!ctx) return;
   if (ctx.state === "suspended") void ctx.resume().catch(() => {});
-  void preload(ctx);
+  void preload("hit", ctx);
+  void preload("party", ctx);
 }
 
-export async function playVerifiedSound() {
-  const ctx = getContext();
+/**
+ * Plays the confirmation hit and resolves when it finishes, so the caller can
+ * reveal the mascot right after the notification sound instead of on top of it.
+ */
+export async function playVerifiedSound(): Promise<void> {
+  const ctx = await Promise.race([runningContext(), delay(1_500).then(() => null)]);
   if (!ctx) return;
-  if (ctx.state === "suspended") {
-    try { await ctx.resume(); } catch { return; }
-  }
-  if (!buffer && preloading) {
-    // Give the local asset a moment to decode; never hold the UI for it.
-    await Promise.race([preloading, new Promise((resolve) => window.setTimeout(resolve, 400))]);
-  }
-  if (buffer) {
-    const gain = ctx.createGain();
-    gain.gain.value = 0.6;
-    const playback = ctx.createBufferSource();
-    playback.buffer = buffer;
-    playback.connect(gain);
-    gain.connect(ctx.destination);
-    playback.start();
+  const buffer = await bufferFor(ctx, "hit");
+  if (!buffer) {
+    synthChime(ctx);
+    await delay(900);
     return;
   }
-  synthChime(ctx);
+  const gain = ctx.createGain();
+  gain.gain.value = 0.6;
+  const playback = ctx.createBufferSource();
+  playback.buffer = buffer;
+  playback.connect(gain);
+  gain.connect(ctx.destination);
+  await new Promise<void>((resolve) => {
+    const safety = window.setTimeout(resolve, buffer.duration * 1000 + 250);
+    playback.onended = () => { window.clearTimeout(safety); resolve(); };
+    playback.start();
+  });
+  try { gain.disconnect(); } catch { /* already detached */ }
+}
+
+/** Loops the mascot music until `stopCelebrationMusic` is called. */
+export async function startCelebrationMusic(): Promise<void> {
+  const ctx = await runningContext();
+  if (!ctx) return;
+  const buffer = await bufferFor(ctx, "party");
+  if (!buffer) return;
+  stopCelebrationMusic();
+  const gain = ctx.createGain();
+  gain.gain.value = 0.5;
+  const playback = ctx.createBufferSource();
+  playback.buffer = buffer;
+  playback.loop = true;
+  playback.connect(gain);
+  gain.connect(ctx.destination);
+  playback.start();
+  partyPlayback = playback;
+  partyGain = gain;
+}
+
+export function stopCelebrationMusic() {
+  if (partyPlayback) {
+    try { partyPlayback.stop(); } catch { /* already stopped */ }
+    try { partyPlayback.disconnect(); } catch { /* already detached */ }
+    partyPlayback = null;
+  }
+  if (partyGain) {
+    try { partyGain.disconnect(); } catch { /* already detached */ }
+    partyGain = null;
+  }
 }
 
 // Used when the wav cannot be fetched, so the moment still has a sound.

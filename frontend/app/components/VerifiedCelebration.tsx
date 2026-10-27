@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import { Kabi } from "./Kabi";
+import { startCelebrationMusic, stopCelebrationMusic } from "../lib/verified-sound";
 
 type VerifiedCelebrationProps = {
   points: number;
@@ -11,10 +12,12 @@ type VerifiedCelebrationProps = {
 };
 
 export default function VerifiedCelebration({ points, day, onDismiss }: VerifiedCelebrationProps) {
+  // The confirmation hit already played before this mounted. The mascot brings
+  // its own loop, which runs until the overlay is closed and then stops.
   useEffect(() => {
-    const timer = window.setTimeout(onDismiss, 12_000);
-    return () => window.clearTimeout(timer);
-  }, [onDismiss]);
+    void startCelebrationMusic();
+    return () => stopCelebrationMusic();
+  }, []);
 
   // The overlay owns the screen, so Escape closes it and the page underneath
   // must not scroll. Both are restored if the component unmounts early.
@@ -46,7 +49,7 @@ export default function VerifiedCelebration({ points, day, onDismiss }: Verified
           <strong>+{points} points</strong>
           <span>{day ? `Day ${String(day).padStart(2, "0")} is on your record.` : "Your accepted submission is on record."}</span>
         </div>
-        <p className="celebration-hint">Click anywhere to continue</p>
+        <p className="celebration-hint">Click anywhere or press Esc to close</p>
         <button type="button" className="celebration-dismiss" onClick={onDismiss} aria-label="Dismiss verification message">×</button>
       </div>
     </aside>
