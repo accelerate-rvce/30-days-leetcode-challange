@@ -5,7 +5,7 @@
 // fresh. `unlockVerifiedSound` runs in the click handler; `playVerifiedSound`
 // runs when the completion row flips to verified, seconds later.
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
-const source = `${basePath}/sounds/verified.wav`;
+const source = `${basePath}/sounds/verified-celebration.wav`;
 
 let context: AudioContext | null = null;
 let buffer: AudioBuffer | null = null;

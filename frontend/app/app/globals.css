@@ -463,22 +463,26 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
 .text-button.danger-text:hover { color: #fecdd3; }
 .text-button:disabled { cursor: not-allowed; opacity: .45; }
 
-/* Verified submission: Rive mascot + chime. */
-.verified-celebration { align-items: center; animation: celebration-in 460ms var(--ease-out) both; background: linear-gradient(150deg, var(--panel-high), var(--panel) 70%); border: 1px solid rgba(34, 211, 238, .34); bottom: 24px; box-shadow: 0 28px 64px rgba(2, 6, 18, .72), 0 0 0 1px rgba(34, 211, 238, .06) inset; display: flex; gap: 16px; max-width: min(420px, calc(100vw - 32px)); padding: 14px 40px 14px 14px; position: fixed; right: 24px; z-index: 60; }
+/* Verified submission: a full-screen moment with the Rive mascot. */
+.verified-celebration { align-items: center; animation: celebration-fade 240ms ease-out both; background: rgba(2, 4, 10, .8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; inset: 0; justify-content: center; padding: 20px; position: fixed; z-index: 90; }
+.verified-panel { align-items: center; animation: celebration-in 560ms var(--ease-out) both; background: linear-gradient(150deg, var(--panel-high), var(--panel) 70%); border: 1px solid rgba(34, 211, 238, .34); box-shadow: 0 40px 120px rgba(2, 6, 18, .82), 0 0 0 1px rgba(34, 211, 238, .06) inset; display: grid; gap: clamp(16px, 3vh, 26px); justify-items: center; max-height: 100%; max-width: min(620px, 100%); overflow: auto; padding: clamp(26px, 5vw, 46px) clamp(24px, 6vw, 64px); position: relative; text-align: center; width: 100%; }
 .kabi-stage { align-items: center; background: var(--brand-glow); border: 1px solid rgba(34, 211, 238, .18); display: grid; flex: none; height: 92px; justify-items: center; overflow: hidden; width: 92px; }
+.verified-panel .kabi-stage { border-color: rgba(34, 211, 238, .2); height: clamp(180px, 32vh, 280px); width: clamp(180px, 32vh, 280px); }
 .kabi-follow { height: 100%; width: 100%; }
 .kabi-canvas { cursor: pointer; display: block; height: 100%; width: 100%; }
 .kabi-mark { height: 68px; width: 68px; }
-.verified-copy { display: grid; gap: 4px; min-width: 0; }
+.verified-copy { display: grid; gap: 6px; justify-items: center; min-width: 0; }
 .verified-copy .eyebrow { margin: 0; }
-.verified-copy strong { font-size: 21px; font-weight: 650; letter-spacing: -.01em; line-height: 1.1; }
-.verified-copy span { color: var(--soft); font-size: 12px; line-height: 1.4; }
-.celebration-dismiss { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 6px; position: absolute; right: 8px; top: 8px; transition: color 160ms ease; }
+.verified-copy strong { font-family: var(--font-geist-mono); font-size: clamp(38px, 7vw, 64px); font-weight: 650; letter-spacing: -.05em; line-height: 1; }
+.verified-copy span { color: var(--soft); font-size: 13px; line-height: 1.4; }
+.celebration-hint { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .08em; margin: 0; text-transform: uppercase; }
+.celebration-dismiss { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 20px; line-height: 1; padding: 8px; position: absolute; right: 8px; top: 8px; transition: color 160ms ease; }
 .celebration-dismiss:hover { color: var(--foreground); }
 .celebration-dismiss:active { transform: scale(.94); }
-@keyframes celebration-in { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@media (prefers-reduced-motion: reduce) { .verified-celebration { animation: none; } }
-@media (max-width: 640px) { .verified-celebration { bottom: 16px; left: 16px; max-width: none; right: 16px; } }
+@keyframes celebration-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes celebration-in { from { opacity: 0; transform: translateY(18px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .verified-celebration, .verified-panel { animation: none; } }
+@media (max-width: 640px) { .verified-panel { padding: 24px 20px 22px; } .verified-panel .kabi-stage { height: clamp(150px, 42vw, 200px); width: clamp(150px, 42vw, 200px); } .celebration-hint { display: none; } }
 
 /* The LeetCode privacy checklist on the challenge page. Both toggles have to
    be on before the verifier can see an accepted submission. */
