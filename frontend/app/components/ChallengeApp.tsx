@@ -915,6 +915,7 @@ function StatusCard() {
           return <span key={day.date} className={className} title={`${day.date}: ${Number.isFinite(value) ? value.toFixed(2) : "—"}%`} />;
         }) : <span className="unknown status-empty" />}
       </div>
+      {recentDays.some((day) => day.label === "black") && <p className="uptime-note">Grey = before this monitor started</p>}
       <div className="health-row"><span>Monitor</span><strong>API · 5 min checks</strong></div>
       <div className="health-row"><span>Current state</span><strong>{label}</strong></div>
       <div className="health-row"><span>Source</span><strong>UptimeRobot</strong></div>

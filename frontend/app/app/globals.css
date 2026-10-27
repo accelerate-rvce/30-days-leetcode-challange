@@ -534,6 +534,7 @@ button.user-avatar { cursor: pointer; padding: 0; }
 .uptime-strip .down { background: var(--red); }
 .uptime-strip .unknown { background: #1e293b; opacity: .45; }
 .uptime-strip .status-empty { grid-column: 1 / -1; }
+.uptime-note { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; margin: -4px 0 12px; }
 .status-page-link { color: var(--accent); display: inline-block; font-family: var(--font-geist-mono); font-size: 10px; margin-top: 14px; text-decoration: none; }
 .status-page-link:hover, .footer-status:hover { color: #67e8f9; }
 .status-card-copy { margin: 20px 0 0; }
