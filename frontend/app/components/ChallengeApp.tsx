@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { formatDate, formatTime } from "./format";
@@ -46,6 +46,16 @@ function viewFor(pathname: string): View {
   if (route === "/support") return "support";
   if (route === "/admin") return "admin";
   return "overview";
+}
+
+// Read the day straight from the address bar. Doing this without
+// `useSearchParams` keeps the dashboard out of a client-render bailout, so a
+// tab or a history link paints on the same click instead of waiting for the
+// route payload to arrive.
+function requestedDayFromLocation(): number | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("day");
+  return value && /^\d{1,2}$/.test(value) ? Number(value) : null;
 }
 
 function useNow() {
@@ -187,12 +197,12 @@ function AccelerateMark() {
 export default function ChallengeApp() {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const view = viewFor(pathname);
+  // The active view and the day are local state so navigation paints on click;
+  // the URL is kept in sync in the background for reloads and sharing.
+  const [view, setView] = useState<View>(() => viewFor(pathname));
   // /challenge?day=7 opens that day. Without it the page means "today", which
   // is also what the Challenge tab does.
-  const requestedDayParam = searchParams.get("day");
-  const requestedDay = requestedDayParam && /^\d{1,2}$/.test(requestedDayParam) ? Number(requestedDayParam) : null;
+  const [requestedDay, setRequestedDay] = useState<number | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const [introComplete, setIntroComplete] = useState(false);
@@ -259,6 +269,29 @@ export default function ChallengeApp() {
   useGridSpotlight();
 
   useEffect(() => { selectedChallengeRef.current = selectedChallengeId; }, [selectedChallengeId]);
+
+  useEffect(() => {
+    // Follow the address bar (back/forward, external links). The click path is
+    // already optimistic in `navigateTo`, so this is a no-op after a push.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setView(viewFor(pathname));
+  }, [pathname]);
+
+  useEffect(() => {
+    const sync = () => setRequestedDay(requestedDayFromLocation());
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  // Paint the destination on the click, then let the router catch the address
+  // bar up. Every dashboard route renders this same shell, so the route payload
+  // only ever updates the URL — never wait on it to show the next view.
+  const navigateTo = (target: View, path: string, day: number | null = null) => {
+    setView(target);
+    setRequestedDay(day);
+    router.push(path);
+  };
 
   // One place turns an API payload into state, so the cached snapshot and a
   // live response render identically.
@@ -777,15 +810,15 @@ export default function ChallengeApp() {
   const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : [])];
   const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "profile" ? "YOUR PROFILE" : view === "challenge" ? (viewingPastDay && selectedChallenge ? `DAY ${String(selectedChallenge.day).padStart(2, "0")} · PAST CHALLENGE` : "TODAY’S QUESTION") : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : view === "admin" ? "ADMIN MONITORING" : "COMMAND CENTER";
 
-  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => router.push(item.path)}>{item.label}</button>)}</nav><div className="top-actions"><button type="button" className="user-avatar" onClick={() => router.push("/profile")} aria-label="Open your profile" title="Your profile">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</button><button type="button" className={`profile-button ${view === "profile" ? "active" : ""}`} onClick={() => router.push("/profile")} aria-current={view === "profile" ? "page" : undefined}>Profile</button><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? (viewingPastDay ? "This day has closed. A late solve still earns points on your record." : "Today’s problem is ready when you are.") : view === "progress" ? "A clear record of the work you have actually verified." : view === "profile" ? "Your name, streak, and the LeetCode profile we verify." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
-    {view === "overview" && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); router.push("/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} currentChallenge={challenge} onSelect={(id) => { const item = challenges.find((candidate) => candidate.id === id); setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((entry) => entry.challenge_id === id) ?? false); setVerifyMessage(""); router.push(item ? `/challenge?day=${item.day}` : "/challenge"); }} /></>}
+  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateTo(item.id, item.path)}>{item.label}</button>)}</nav><div className="top-actions"><button type="button" className="user-avatar" onClick={() => navigateTo("profile", "/profile")} aria-label="Open your profile" title="Your profile">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</button><button type="button" className={`profile-button ${view === "profile" ? "active" : ""}`} onClick={() => navigateTo("profile", "/profile")} aria-current={view === "profile" ? "page" : undefined}>Profile</button><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? (viewingPastDay ? "This day has closed. A late solve still earns points on your record." : "Today’s problem is ready when you are.") : view === "progress" ? "A clear record of the work you have actually verified." : view === "profile" ? "Your name, streak, and the LeetCode profile we verify." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
+    {view === "overview" && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); navigateTo("challenge", "/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} currentChallenge={challenge} onSelect={(id) => { const item = challenges.find((candidate) => candidate.id === id); setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((entry) => entry.challenge_id === id) ?? false); setVerifyMessage(""); navigateTo("challenge", item ? `/challenge?day=${item.day}` : "/challenge", item?.day ?? null); }} /></>}
     {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} attemptRecorded={attemptRecorded} recording={recording} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={selectedStatus?.status ?? null} verificationJob={selectedStatus?.verification ?? null} awardedPoints={selectedStatus?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
     {view === "progress" && <ProgressView progress={progress} verifiedCount={verified.length} challenges={challenges} />}
     {view === "profile" && <ProfileView progress={progress} email={session.user.email ?? ""} name={waitlistName} handle={leetcodeHandle} academicYear={academicYear} saving={profileSaving} error={profileError} notice={profileNotice} onName={setWaitlistName} onHandle={setLeetcodeHandle} onYear={setAcademicYear} onSave={updateProfile} />}
     {view === "leaderboard" && <Leaderboard rows={leaderboard} query={leaderboardQuery} setQuery={setLeaderboardQuery} me={progress.profile.leetcode_username ?? ""} myName={progress.profile.name} />}
     {view === "resources" && <Resources query={resourceQuery} setQuery={setResourceQuery} filtered={filteredResources} />}
     {view === "support" && <Support />}
-    {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} completions={adminCompletions} onReturn={() => router.push("/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminCompletions(overview.completions); setAdminLogs(overview.logs); }} onSettingsSaved={(next) => { setSiteSettings(next); setSettingsError(""); }} />}
+    {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} completions={adminCompletions} onReturn={() => navigateTo("overview", "/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminCompletions(overview.completions); setAdminLogs(overview.logs); }} onSettingsSaved={(next) => { setSiteSettings(next); setSettingsError(""); }} />}
   </main><footer><span>ACCELERATE // THE COMPUTER SCIENCE CLUB OF RVCE · MYSURU ROAD, BENGALURU 560059</span><span>INNOVATE · CONNECT · INSPIRE</span></footer>{celebration && <VerifiedCelebration points={celebration.points} day={challenges.find((item) => item.id === celebration.challengeId)?.day} onDismiss={dismissCelebration} />}</div>;
 }
 
