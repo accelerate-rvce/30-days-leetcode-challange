@@ -20,7 +20,7 @@ const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
 // Rive touches canvas/wasm at import time, so keep it out of the server render.
 const VerifiedCelebration = dynamic(() => import("./VerifiedCelebration"), { ssr: false });
 
-type View = "overview" | "challenge" | "progress" | "leaderboard" | "resources" | "support" | "admin";
+type View = "overview" | "challenge" | "progress" | "profile" | "leaderboard" | "resources" | "support" | "admin";
 type OnboardingStage = "welcome" | "briefing" | "signin" | "waitlist" | "ready";
 
 const resources = [
@@ -41,6 +41,7 @@ function viewFor(pathname: string): View {
   const route = pathname === "/" ? pathname : pathname.replace(/\/+$/, "");
   if (route === "/challenge") return "challenge";
   if (route === "/progress") return "progress";
+  if (route === "/profile") return "profile";
   if (route === "/leaderboard") return "leaderboard";
   if (route === "/resources") return "resources";
   if (route === "/support") return "support";
@@ -206,6 +207,9 @@ export default function ChallengeApp() {
   const [verifyMessage, setVerifyMessage] = useState("");
   const [leetcodeHandle, setLeetcodeHandle] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileNotice, setProfileNotice] = useState("");
   const [waitlistName, setWaitlistName] = useState("");
   const [academicYear, setAcademicYear] = useState("Second Year");
   const [resourceQuery, setResourceQuery] = useState("");
@@ -677,6 +681,40 @@ export default function ChallengeApp() {
     finally { setSavingProfile(false); }
   }
 
+  // Profile-page save. Same endpoint as registration, but it stays on the page
+  // and reports success instead of advancing the onboarding flow.
+  async function updateProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || profileSaving) return;
+    if (!waitlistName.trim()) { setProfileError("Enter your name."); return; }
+    if (!leetcodeHandle.trim()) { setProfileError("Enter your LeetCode username or profile URL."); return; }
+    setProfileSaving(true); setProfileError(""); setProfileNotice("");
+    try {
+      const response = await fetch(`${api}/api/profile`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: waitlistName.trim(), academic_year: academicYear, leetcode_username: leetcodeHandle.trim() }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string; profile?: { name?: string; academic_year?: string; leetcode_username?: string | null } };
+      if (!response.ok) throw new Error(body.error ?? "profile_update_failed");
+      const saved = body.profile;
+      if (saved) {
+        setProgress((current) => current ? { ...current, profile: { ...current.profile, name: saved.name ?? current.profile.name, academic_year: saved.academic_year ?? current.profile.academic_year, leetcode_username: saved.leetcode_username ?? null } } : current);
+        if (saved.name) setWaitlistName(saved.name);
+        if (saved.academic_year) setAcademicYear(saved.academic_year);
+        setLeetcodeHandle(saved.leetcode_username ?? "");
+      }
+      setProfileNotice("Saved. Your LeetCode profile is linked.");
+    } catch (saveError) {
+      const code = saveError instanceof Error ? saveError.message : "";
+      setProfileError(code === "leetcode_username_not_found" ? "We couldn’t find that LeetCode account. Check the URL and try again."
+        : code === "leetcode_check_unavailable" ? "LeetCode isn’t responding right now. Try again in a minute."
+        : code === "leetcode_username_taken" ? "That LeetCode account is already linked to another student."
+        : code === "invalid_leetcode_username" || code === "invalid_profile" ? "Enter a valid name and LeetCode profile URL."
+        : "We couldn’t save your profile. Check your connection and try again.");
+    } finally { setProfileSaving(false); }
+  }
+
   const verified = useMemo(() => progress?.statuses.filter((item) => item.status === "verified") ?? [], [progress]);
   const selectedChallenge = challenges.find((item) => item.id === selectedChallengeId) ?? challenge;
   const filteredResources = useMemo(() => resources.filter((resource) => `${resource.title} ${resource.detail} ${resource.category}`.toLowerCase().includes(resourceQuery.toLowerCase().trim())), [resourceQuery]);
@@ -699,18 +737,82 @@ export default function ChallengeApp() {
   if (!isAdmin && (onboardingStage === "waitlist" || !editingRegistration)) return <WaitlistDetails name={waitlistName} setName={setWaitlistName} handle={leetcodeHandle} setHandle={setLeetcodeHandle} academicYear={academicYear} setAcademicYear={setAcademicYear} saving={savingProfile} onSave={saveProfile} onCancel={editingRegistration ? () => { setError(""); setOnboardingStage("ready"); } : undefined} error={error} notice={launchGated ? (editingRegistration ? (siteSettings?.message || "You’re registered. The dashboard unlocks at launch.") : "Connect your LeetCode handle to complete your waitlist registration.") : ""} />;
   if (launchGated) return <ComingSoon name={progress.profile.name} handle={progress.profile.leetcode_username ?? ""} academicYear={progress.profile.academic_year ?? "Second Year"} email={session.user.email ?? ""} message={siteSettings?.message ?? ""} launchAt={siteSettings?.launchAt ?? null} onEdit={() => { setError(""); setOnboardingStage("waitlist"); }} onSignOut={signOut} />;
 
-  const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : [])];
-  const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "challenge" ? "TODAY’S QUESTION" : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : view === "admin" ? "ADMIN MONITORING" : "COMMAND CENTER";
+  const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "profile", label: "Profile", path: "/profile" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : [])];
+  const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "profile" ? "YOUR PROFILE" : view === "challenge" ? "TODAY’S QUESTION" : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : view === "admin" ? "ADMIN MONITORING" : "COMMAND CENTER";
 
-  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => router.push(item.path)}>{item.label}</button>)}</nav><div className="top-actions"><div className="user-avatar">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</div><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? "Today’s problem is ready when you are." : view === "progress" ? "A clear record of the work you have actually verified." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
+  return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => router.push(item.path)}>{item.label}</button>)}</nav><div className="top-actions"><button type="button" className="user-avatar" onClick={() => router.push("/profile")} aria-label="Open your profile" title="Your profile">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</button><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? "Today’s problem is ready when you are." : view === "progress" ? "A clear record of the work you have actually verified." : view === "profile" ? "Your name, streak, and the LeetCode profile we verify." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
     {view === "overview" && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); router.push("/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} currentChallenge={challenge} onSelect={(id) => { setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((item) => item.challenge_id === id) ?? false); setVerifyMessage(""); router.push("/challenge"); }} /></>}
     {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} attemptRecorded={attemptRecorded} recording={recording} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={progress?.statuses.find((item) => item.challenge_id === selectedChallenge?.id)?.status ?? null} awardedPoints={progress?.statuses.find((item) => item.challenge_id === selectedChallenge?.id)?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
     {view === "progress" && <ProgressView progress={progress} verifiedCount={verified.length} challenges={challenges} />}
+    {view === "profile" && <ProfileView progress={progress} email={session.user.email ?? ""} name={waitlistName} handle={leetcodeHandle} academicYear={academicYear} saving={profileSaving} error={profileError} notice={profileNotice} onName={setWaitlistName} onHandle={setLeetcodeHandle} onYear={setAcademicYear} onSave={updateProfile} />}
     {view === "leaderboard" && <Leaderboard rows={leaderboard} query={leaderboardQuery} setQuery={setLeaderboardQuery} />}
     {view === "resources" && <Resources query={resourceQuery} setQuery={setResourceQuery} filtered={filteredResources} />}
     {view === "support" && <Support />}
     {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} completions={adminCompletions} onReturn={() => router.push("/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminCompletions(overview.completions); setAdminLogs(overview.logs); }} onSettingsSaved={(next) => { setSiteSettings(next); setSettingsError(""); }} />}
   </main><footer><span>ACCELERATE // THE COMPUTER SCIENCE CLUB OF RVCE · MYSURU ROAD, BENGALURU 560059</span><span>INNOVATE · CONNECT · INSPIRE</span></footer>{celebration && <VerifiedCelebration points={celebration.points} day={challenges.find((item) => item.id === celebration.challengeId)?.day} onDismiss={dismissCelebration} />}</div>;
+}
+
+function ProfileView({ progress, email, name, handle, academicYear, saving, error, notice, onName, onHandle, onYear, onSave }: {
+  progress: Progress;
+  email: string;
+  name: string;
+  handle: string;
+  academicYear: string;
+  saving: boolean;
+  error: string;
+  notice: string;
+  onName: (value: string) => void;
+  onHandle: (value: string) => void;
+  onYear: (value: string) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const profile = progress.profile;
+  const savedHandle = profile.leetcode_username ?? "";
+  const leetcodeUrl = savedHandle ? `https://leetcode.com/u/${savedHandle}/` : null;
+  const currentStreak = profile.streak ?? 0;
+  const longestStreak = profile.longest_streak ?? currentStreak;
+  const initials = (profile.name || email || "U").split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+
+  return <section className="profile-layout">
+    <article className="panel profile-card">
+      <div className="eyebrow">STUDENT PROFILE</div>
+      <div className="profile-identity">
+        <span className="profile-avatar" aria-hidden="true">{initials}</span>
+        <div>
+          <h2>{profile.name || "RVCE student"}</h2>
+          <p>{profile.academic_year ?? academicYear}{email ? ` · ${email}` : ""}</p>
+        </div>
+      </div>
+      <div className="profile-stats">
+        <div><small>CURRENT STREAK</small><strong>{currentStreak}<em> days</em></strong></div>
+        <div><small>LONGEST STREAK</small><strong>{longestStreak}<em> days</em></strong></div>
+        <div><small>POINTS</small><strong>{profile.points}</strong></div>
+        <div><small>VERIFIED</small><strong>{progress.verifiedCompletions}<em> / 30</em></strong></div>
+      </div>
+      <div className="profile-leetcode">
+        <div className="eyebrow">LEETCODE PROFILE</div>
+        {leetcodeUrl
+          ? <a href={leetcodeUrl} target="_blank" rel="noreferrer">{leetcodeUrl}</a>
+          : <p className="empty-copy">No LeetCode profile linked yet. Add it on the right so the verifier can read your submissions.</p>}
+        <p className="profile-hint">This is the URL we verify against. Example: <code>https://leetcode.com/u/your-handle/</code></p>
+      </div>
+    </article>
+    <article className="panel profile-form-panel">
+      <div className="eyebrow">UPDATE SECTION</div>
+      <h2>Keep your details current</h2>
+      <form className="profile-form" onSubmit={onSave}>
+        <label>Name<input value={name} onChange={(event) => onName(event.target.value)} maxLength={120} autoComplete="name" /></label>
+        <label>Academic year<select value={academicYear} onChange={(event) => onYear(event.target.value)}>
+          {["First Year", "Second Year", "Third Year", "Fourth Year"].map((year) => <option key={year} value={year}>{year}</option>)}
+        </select></label>
+        <label>LeetCode profile URL<input value={handle} onChange={(event) => onHandle(event.target.value)} placeholder="https://leetcode.com/u/your-handle/" autoCapitalize="none" autoCorrect="off" spellCheck={false} /></label>
+        <p className="form-hint">Paste your full profile URL or just the username. We store the handle and link it as <code>leetcode.com/u/&lt;handle&gt;/</code>.</p>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {notice && <p className="form-notice" role="status">{notice}</p>}
+        <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+      </form>
+    </article>
+  </section>;
 }
 
 function ChallengeCard({ challenge, onOpen }: { challenge: Challenge | null; onOpen: () => void }) { return <article className="panel challenge-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY’S QUESTION {challenge && <span className="muted">· DAY {String(challenge.day).padStart(2, "0")}</span>}</div><h2>{challenge?.title ?? "No challenge published"}</h2></div>{challenge && <span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()}</span>}</div>{challenge ? <><div className="problem-meta"><span><b>{challenge.slug.toUpperCase()}</b> PROBLEM ID</span><span><b>{challenge.points} PTS</b> AVAILABLE</span><span><b>{formatTime(challenge.deadlineAt)} IST</b> DEADLINE</span></div><p className="challenge-privacy-note"><strong>Curate your profile:</strong> turn on <b>Recent AC Problems and Submission Details</b> and <b>Submission Heatmap</b> in <a href="https://leetcode.com/settings/profile/" target="_blank" rel="noreferrer">LeetCode privacy settings</a> so we can verify your solve.</p><button className="primary-button" onClick={onOpen}>Open question <span>→</span></button></> : <p className="empty-copy">The next challenge will appear here when it is published.</p>}</article>; }

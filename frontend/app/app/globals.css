@@ -488,3 +488,31 @@ footer span:last-child { color: var(--accent-purple-soft); letter-spacing: .12em
 .privacy-rows li b { color: var(--accent); font-family: var(--font-geist-mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .challenge-panel .challenge-privacy-note strong { color: var(--soft); }
 .challenge-panel .challenge-privacy-note b { color: var(--accent); font-weight: 600; }
+
+/* Profile page: identity + streaks + the LeetCode URL we verify against, and
+   the form that updates it. */
+button.user-avatar { cursor: pointer; padding: 0; }
+.profile-layout { align-items: start; display: grid; gap: 10px; grid-template-columns: 1.15fr .85fr; }
+.profile-identity { align-items: center; display: flex; gap: 16px; margin: 20px 0 24px; }
+.profile-avatar { align-items: center; background: #11243a; border: 1px solid rgba(34,211,238,.32); color: var(--accent); display: flex; font-family: var(--font-geist-mono); font-size: 20px; font-weight: 700; height: 58px; justify-content: center; min-width: 58px; width: 58px; }
+.profile-identity h2 { font-size: 26px; margin: 0; }
+.profile-identity p { color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; margin-top: 6px; overflow-wrap: anywhere; }
+.profile-stats { border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); display: grid; gap: 10px; grid-template-columns: repeat(4, 1fr); padding: 16px 0; }
+.profile-stats small { color: var(--muted); display: block; font-family: var(--font-geist-mono); font-size: 8px; letter-spacing: .08em; }
+.profile-stats strong { color: #fff; display: block; font-family: var(--font-geist-mono); font-size: 22px; letter-spacing: -.04em; margin-top: 8px; }
+.profile-stats em { color: var(--muted); font-size: 10px; font-style: normal; letter-spacing: 0; }
+.profile-leetcode { margin-top: 22px; }
+.profile-leetcode a { color: var(--accent); display: inline-block; font-family: var(--font-geist-mono); font-size: 12px; margin-top: 8px; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 2px; }
+.profile-leetcode a:hover { color: #67e8f9; }
+.profile-hint { color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; line-height: 1.6; margin-top: 10px; }
+.profile-hint code { color: var(--accent-soft); }
+.profile-form { display: grid; gap: 12px; margin-top: 20px; }
+.profile-form label { color: var(--muted); display: grid; font-family: var(--font-geist-mono); font-size: 10px; gap: 6px; }
+.profile-form input, .profile-form select { background: var(--background); border: 1px solid var(--line); border-radius: 0; color: var(--foreground); font-family: var(--font-inter); font-size: 14px; min-height: 44px; outline: 0; padding: 0 12px; width: 100%; }
+.profile-form input:focus, .profile-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(34,211,238,.1); }
+.form-hint { color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; line-height: 1.6; margin: 0; }
+.form-hint code { color: var(--accent-soft); }
+.form-notice { color: var(--accent); font-size: 12px; margin: 0; }
+.profile-form .primary-button { margin-top: 4px; width: 100%; }
+@media (max-width: 940px) { .profile-layout { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .profile-stats { grid-template-columns: repeat(2, 1fr); } }

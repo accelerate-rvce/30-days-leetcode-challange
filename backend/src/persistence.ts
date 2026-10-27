@@ -181,7 +181,7 @@ export async function getNextChallengePublishAt() {
 export async function getPersistentProgress(profileId: string) {
   if (!db) return null;
   const [{ data: profile, error: profileError }, { data: completions, error: completionError }, { data: jobs, error: jobError }] = await Promise.all([
-    db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").eq("id", profileId).maybeSingle(),
+    db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,longest_streak,role").eq("id", profileId).maybeSingle(),
     db.from("completions").select("id,challenge_id,status,attempted_at,verified_at,submission_at,awarded_points,evidence").eq("profile_id", profileId).order("attempted_at", { ascending: false }),
     db.from("verification_jobs").select("challenge_id,status,attempts,available_at,last_error").eq("profile_id", profileId),
   ]);
@@ -205,7 +205,7 @@ export async function getPersistentProgress(profileId: string) {
     const { data: authUser } = await db.auth.admin.getUserById(profileId);
     const user = authUser?.user;
     const name = user?.user_metadata?.full_name ?? user?.email ?? "RVCE student";
-    return { profile: { id: profileId, name, leetcode_username: null, academic_year: "Second Year", points: 0, streak: 0, role: "student" }, verifiedCompletions: 0, completionPercentage: 0, statuses: [] };
+    return { profile: { id: profileId, name, leetcode_username: null, academic_year: "Second Year", points: 0, streak: 0, longest_streak: 0, role: "student" }, verifiedCompletions: 0, completionPercentage: 0, statuses: [] };
   }
   const verified = (completions ?? []).filter((item) => item.status === "verified");
   return { profile, verifiedCompletions: verified.length, completionPercentage: Math.round((verified.length / 30) * 100), statuses: withVerification(completions ?? []) };
