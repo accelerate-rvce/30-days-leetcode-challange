@@ -308,27 +308,27 @@ async function readSolvedByProfile() {
   return solvedByProfile;
 }
 
-async function readReachedAtByProfile() {
-  const reachedAtByProfile = new Map<string, number>();
-  if (!db) return reachedAtByProfile;
+async function readSubmittedAtByProfile() {
+  const submittedAtByProfile = new Map<string, number>();
+  if (!db) return submittedAtByProfile;
   const pageSize = 1_000;
   for (let from = 0; ; from += pageSize) {
     const { data: completions, error } = await db
       .from("completions")
-      .select("profile_id,verified_at,submission_at")
+      .select("profile_id,submission_at,verified_at")
       .eq("status", "verified")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) throw error;
     for (const completion of completions ?? []) {
-      const at = Date.parse(completion.verified_at ?? completion.submission_at ?? "");
-      if (Number.isFinite(at) && at > (reachedAtByProfile.get(completion.profile_id) ?? Number.NEGATIVE_INFINITY)) {
-        reachedAtByProfile.set(completion.profile_id, at);
+      const at = Date.parse(completion.submission_at ?? completion.verified_at ?? "");
+      if (Number.isFinite(at) && at > (submittedAtByProfile.get(completion.profile_id) ?? Number.NEGATIVE_INFINITY)) {
+        submittedAtByProfile.set(completion.profile_id, at);
       }
     }
     if (!completions || completions.length < pageSize) break;
   }
-  return reachedAtByProfile;
+  return submittedAtByProfile;
 }
 
 const leaderboardCollator = new Intl.Collator("en", { sensitivity: "base" });
@@ -336,45 +336,37 @@ const leaderboardCollator = new Intl.Collator("en", { sensitivity: "base" });
 async function readLeaderboard(query: string) {
   if (!db) return null;
   const request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin");
-  const [{ data, error }, solvedByProfile, reachedAtByProfile] = await Promise.all([
+  const [{ data, error }, solvedByProfile, submittedAtByProfile] = await Promise.all([
     request,
     readSolvedByProfile(),
-    readReachedAtByProfile(),
+    readSubmittedAtByProfile(),
   ]);
   if (error) throw error;
 
-  // Students on the same score share a rank (1, 1, 2). Inside a tie, the
-  // student who reached that score first is listed first, so the board rewards
-  // speed without turning equal scores into different ranks.
-  const ordered = (data ?? [])
-    .map((profile) => ({
-      name: profile.name,
-      handle: profile.leetcode_username ?? "",
-      academicYear: profile.academic_year,
-      points: profile.points,
-      streak: profile.streak ?? 0,
-      solved: solvedByProfile.get(profile.id) ?? 0,
-      reachedAt: reachedAtByProfile.get(profile.id) ?? Number.POSITIVE_INFINITY,
-    }))
-    .sort((left, right) =>
-      right.points - left.points
-      || left.reachedAt - right.reachedAt
-      || leaderboardCollator.compare(left.name, right.name)
-      || leaderboardCollator.compare(left.handle, right.handle),
-    );
-
-  let rank = 0;
-  let previousPoints: number | null = null;
-  const ranked = ordered.map(({ reachedAt: _reachedAt, ...row }) => {
-    if (previousPoints === null || row.points !== previousPoints) {
-      rank += 1;
-      previousPoints = row.points;
-    }
-    return { rank, ...row };
-  });
+  // Rank every student uniquely: points first, then the current streak, then
+  // the earlier latest submission. Name is only a deterministic final fallback
+  // when two students have identical scores, streaks, and submission times.
+  const rows = (data ?? []).map((profile) => ({
+    name: profile.name,
+    handle: profile.leetcode_username ?? "",
+    academicYear: profile.academic_year,
+    points: profile.points,
+    streak: profile.streak ?? 0,
+    solved: solvedByProfile.get(profile.id) ?? 0,
+    submittedAt: submittedAtByProfile.get(profile.id) ?? Number.POSITIVE_INFINITY,
+  }));
+  rows.sort((left, right) =>
+    right.points - left.points
+    || right.streak - left.streak
+    || left.submittedAt - right.submittedAt
+    || leaderboardCollator.compare(left.name, right.name)
+    || leaderboardCollator.compare(left.handle, right.handle),
+  );
 
   const safeQuery = query.replace(/[,%()]/g, "").trim().toLowerCase();
-  return ranked.filter((row) => !safeQuery || `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(safeQuery));
+  return rows
+    .map(({ submittedAt: _submittedAt, ...row }, index) => ({ ...row, rank: index + 1 }))
+    .filter((row) => !safeQuery || `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(safeQuery));
 }
 
 export async function getPersistentJobMetrics() {
