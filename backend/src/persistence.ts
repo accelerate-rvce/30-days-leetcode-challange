@@ -907,6 +907,16 @@ export async function markPersistentRetry(job: ClaimedJob, errorMessage: string,
     last_error: errorMessage,
     locked_at: null,
   }).eq("id", job.id);
+  // A terminal retry failure (for example a missing handle) must not leave the
+  // completion looking like an open check forever. Never downgrade a row that
+  // another path verified while this job was in flight.
+  if (terminal) {
+    await db.from("completions")
+      .update({ status: "not_verified" })
+      .eq("profile_id", job.profile_id)
+      .eq("challenge_id", job.challenge_id)
+      .neq("status", "verified");
+  }
 }
 
 export async function markPersistentNotFound(job: ClaimedJob, maxRetries: number) {
