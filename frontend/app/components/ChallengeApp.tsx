@@ -11,6 +11,7 @@ import type { AdminChallenge, AdminCompletion, AdminJob, AdminLog, AdminMetrics,
 import ParticleText from "./ParticleText";
 import { playVerifiedSound, unlockVerifiedSound } from "../lib/verified-sound";
 import { playWhoosh, primeWhoosh } from "../lib/whoosh-sound";
+import { playClickSound, primeClickSound } from "../lib/click-sound";
 import { clearDashboardSnapshot, readDashboardSnapshot, readSettingsCache, writeDashboardSnapshot, writeSettingsCache } from "../lib/dashboard-cache";
 
 const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
@@ -400,6 +401,15 @@ export default function ChallengeApp() {
   // Fetch the hand-off clip while the dashboard is idle so the whoosh starts on
   // the click instead of waiting on a network round trip.
   useEffect(() => { primeWhoosh(); }, []);
+
+  // One capture-phase listener covers every button, link, tab and card in the
+  // app (including keyboard activation) without touching each handler.
+  useEffect(() => {
+    primeClickSound();
+    const onClick = () => playClickSound();
+    window.addEventListener("click", onClick, true);
+    return () => window.removeEventListener("click", onClick, true);
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
