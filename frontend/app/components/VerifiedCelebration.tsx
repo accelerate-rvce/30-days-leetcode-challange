@@ -12,8 +12,8 @@ type VerifiedCelebrationProps = {
 };
 
 export default function VerifiedCelebration({ points, day, onDismiss }: VerifiedCelebrationProps) {
-  // The confirmation hit already played before this mounted. The mascot brings
-  // its own loop, which runs until the overlay is closed and then stops.
+  // The confirmation hit is still ringing: the mascot joined three seconds in
+  // and brings its own loop, which runs until the overlay is closed.
   useEffect(() => {
     void startCelebrationMusic();
     return () => stopCelebrationMusic();

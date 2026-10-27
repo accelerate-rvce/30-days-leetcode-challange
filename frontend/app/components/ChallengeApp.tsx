@@ -12,6 +12,7 @@ import ParticleText from "./ParticleText";
 import { playVerifiedSound, unlockVerifiedSound } from "../lib/verified-sound";
 import { playWhoosh, primeWhoosh } from "../lib/whoosh-sound";
 import { playClickSound, primeClickSound } from "../lib/click-sound";
+import { playSiteEntrance } from "../lib/site-sound";
 import { clearDashboardSnapshot, readDashboardSnapshot, readSettingsCache, writeDashboardSnapshot, writeSettingsCache } from "../lib/dashboard-cache";
 
 const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
@@ -400,9 +401,9 @@ export default function ChallengeApp() {
     return () => window.clearTimeout(timer);
   }, [introSeen]);
 
-  // Fetch the hand-off clip while the dashboard is idle so the whoosh starts on
-  // the click instead of waiting on a network round trip.
-  useEffect(() => { primeWhoosh(); }, []);
+  // Prime the hand-off clip and play the site entrance ident. Autoplay is often
+  // blocked until the first gesture; the ident handles that by itself.
+  useEffect(() => { primeWhoosh(); playSiteEntrance(); }, []);
 
   // One capture-phase listener covers every button, link, tab and card in the
   // app (including keyboard activation) without touching each handler.

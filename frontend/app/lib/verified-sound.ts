@@ -6,6 +6,9 @@
 //   2. `verified-party.mp3` — the mascot moment's music, looped until the
 //      student closes the celebration overlay.
 //
+// The mascot does not wait for the whole hit: it opens three seconds in, while
+// the hit is still ringing, and the party loop starts with it.
+//
 // The verdict arrives from a websocket callback, not a click, so the browser
 // needs the audio unlocked while the "Check Now" gesture is still fresh.
 // `unlockVerifiedSound` runs in the click handler and decodes both files;
@@ -73,9 +76,14 @@ export function unlockVerifiedSound() {
   void preload("party", ctx);
 }
 
+// The overlay and its music join three seconds into the hit, so the mascot
+// lands on the peak of the thunder instead of after it has fully died out.
+const revealAfterMs = 3_000;
+
 /**
- * Plays the confirmation hit and resolves when it finishes, so the caller can
- * reveal the mascot right after the notification sound instead of on top of it.
+ * Plays the confirmation hit and resolves when the mascot should appear (three
+ * seconds in). The hit keeps playing underneath; its gain is only released
+ * when the clip actually ends.
  */
 export async function playVerifiedSound(): Promise<void> {
   const ctx = await Promise.race([runningContext(), delay(1_500).then(() => null)]);
@@ -93,11 +101,14 @@ export async function playVerifiedSound(): Promise<void> {
   playback.connect(gain);
   gain.connect(ctx.destination);
   await new Promise<void>((resolve) => {
-    const safety = window.setTimeout(resolve, buffer.duration * 1000 + 250);
-    playback.onended = () => { window.clearTimeout(safety); resolve(); };
+    const reveal = window.setTimeout(resolve, Math.min(buffer.duration * 1000, revealAfterMs));
+    playback.onended = () => {
+      window.clearTimeout(reveal);
+      try { gain.disconnect(); } catch { /* already detached */ }
+      resolve();
+    };
     playback.start();
   });
-  try { gain.disconnect(); } catch { /* already detached */ }
 }
 
 /** Loops the mascot music until `stopCelebrationMusic` is called. */

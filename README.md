@@ -130,11 +130,20 @@ takes over the screen with a centred Rive mascot. All of it is client-side only:
 - `frontend/app/public/sounds/verified-celebration.wav` is the confirmation
   hit. It plays the moment the verdict lands, so it acts as the notification.
 - `frontend/app/public/sounds/verified-party.mp3` is the mascot music. The
-  overlay only appears once the hit has finished, then loops this track until
-  the student closes it (click, ×, or Escape).
+  overlay opens three seconds into the hit, while the thunder is still ringing,
+  and the loop runs until the student closes it (click, ×, or Escape). The tail
+  of the hit finishes underneath.
 - Both files are decoded during the Check Now click (`unlockVerifiedSound`),
   because browsers will not start audio from a websocket callback alone. The
   hit falls back to a synthesized chime if the file cannot be fetched.
+
+### Site entrance ident
+
+`frontend/app/public/indian-percussion-ident-om-fx-1-00-04.mp3` plays when the
+site is opened (`lib/site-sound.ts`). It is attempted immediately on load; if
+the browser blocks autoplay, the same ident starts on the visitor's first click
+or key press. It plays once per page load, so moving between pages never
+restarts it.
 
 ### Interface click
 
