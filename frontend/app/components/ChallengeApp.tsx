@@ -873,6 +873,10 @@ function StatusCard() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      setState({ kind: "error" });
+    }, 8_000);
     fetch(statusApiUrl, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error(`status_${response.status}`);
@@ -881,8 +885,12 @@ function StatusCard() {
       .then((body) => setState({ kind: "ready", monitor: body.data?.[0] ?? null }))
       .catch(() => {
         if (!controller.signal.aborted) setState({ kind: "error" });
-      });
-    return () => controller.abort();
+      })
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   const monitor = state.kind === "ready" ? state.monitor : null;
