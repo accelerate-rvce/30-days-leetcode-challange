@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { Session } from "@supabase/supabase-js";
@@ -35,6 +35,19 @@ const resources = [
 const supportEmails = [process.env.NEXT_PUBLIC_SUPPORT_EMAIL_ONE, process.env.NEXT_PUBLIC_SUPPORT_EMAIL_TWO].filter((email): email is string => Boolean(email));
 const whatsappGroupUrl = "https://chat.whatsapp.com/BkepWkoH1ftLOI58e9EPq3?s=cl&p=a&mlu=4&ilr=4";
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+
+// The intro is a one-per-tab experience. Keeping the flag in sessionStorage
+// means a reload (or any hard navigation the router falls back to) reuses the
+// dashboard instead of replaying "WELCOME, RVIANS", while a fresh tab still
+// gets the intro.
+const introSeenKey = "30days:intro-seen";
+function hasSeenIntro() {
+  try { return window.sessionStorage.getItem(introSeenKey) === "1"; } catch { return false; }
+}
+function rememberIntro() {
+  try { window.sessionStorage.setItem(introSeenKey, "1"); } catch { /* private mode: replay is harmless */ }
+}
+const noopSubscribe = () => () => {};
 
 function viewFor(pathname: string): View {
   const route = pathname === "/" ? pathname : pathname.replace(/\/+$/, "");
@@ -205,7 +218,11 @@ export default function ChallengeApp() {
   const [requestedDay, setRequestedDay] = useState<number | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
-  const [introComplete, setIntroComplete] = useState(false);
+  const [introDone, setIntroDone] = useState(false);
+  // `useSyncExternalStore` lets the server keep rendering the intro markup
+  // while the client reads sessionStorage after hydration, without a mismatch.
+  const introSeen = useSyncExternalStore(noopSubscribe, hasSeenIntro, () => false);
+  const introComplete = introSeen || introDone;
   const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>("welcome");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -284,13 +301,16 @@ export default function ChallengeApp() {
     return () => window.removeEventListener("popstate", sync);
   }, []);
 
-  // Paint the destination on the click, then let the router catch the address
-  // bar up. Every dashboard route renders this same shell, so the route payload
-  // only ever updates the URL — never wait on it to show the next view.
+  // Paint the destination on the click, then update the address bar directly.
+  // Every dashboard route renders this same shell, so a router navigation only
+  // exists to change the URL — and an RSC fetch that fails makes the app router
+  // fall back to a hard reload (losing the session and replaying the intro).
   const navigateTo = (target: View, path: string, day: number | null = null) => {
     setView(target);
     setRequestedDay(day);
-    router.push(path);
+    if (typeof window === "undefined") return;
+    const next = `${basePath}${path}`;
+    if (`${window.location.pathname}${window.location.search}` !== next) window.history.pushState(null, "", next);
   };
 
   // One place turns an API payload into state, so the cached snapshot and a
@@ -366,9 +386,10 @@ export default function ChallengeApp() {
   }, [api, applyDashboard, currentUserId, token]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setIntroComplete(true), 2400);
+    if (introSeen) return;
+    const timer = window.setTimeout(() => { rememberIntro(); setIntroDone(true); }, 2400);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [introSeen]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -616,7 +637,7 @@ export default function ChallengeApp() {
     if (!supabase) return;
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) setError("Couldn’t sign you out. Please try again.");
-    else { if (currentUserId) clearDashboardSnapshot(currentUserId); pendingAttempts.current.clear(); setSession(null); setProgress(null); setChallenge(null); setChallenges([]); setNextPublishAt(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminCompletions([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("welcome"); setIntroComplete(false); window.setTimeout(() => setIntroComplete(true), 2400); }
+    else { if (currentUserId) clearDashboardSnapshot(currentUserId); pendingAttempts.current.clear(); setSession(null); setProgress(null); setChallenge(null); setChallenges([]); setNextPublishAt(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminCompletions([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("welcome"); }
   }
 
   async function recordAndSolve() {
@@ -789,7 +810,10 @@ export default function ChallengeApp() {
   const viewingPastDay = requestedDay !== null && selectedChallenge != null && selectedChallenge.day !== challenge?.day;
   const filteredResources = useMemo(() => resources.filter((resource) => `${resource.title} ${resource.detail} ${resource.category}`.toLowerCase().includes(resourceQuery.toLowerCase().trim())), [resourceQuery]);
 
-  if (!introComplete || authLoading) return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#22d3ee" highlightColor="#a855f7" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE · INNOVATE · CONNECT · INSPIRE</p></div></main>;
+  if (!introComplete) return <main className="entry-splash" aria-label="Accelerate Club introduction"><div className="onboarding-grid" aria-hidden="true" /><div className="entry-splash-content"><ParticleText text="WELCOME, RVIANS" color="#22d3ee" highlightColor="#a855f7" scatter={135} gatherDuration={1400} stagger={320} pointerRepel={28} repelRadius={110} idleDrift={0.4} fontSize="clamp(2.2rem, 7.4vw, 5rem)" fontWeight={800} /><p>ACCELERATE · INNOVATE · CONNECT · INSPIRE</p></div></main>;
+  // Session is checked once per mount, but it must never bring the intro back:
+  // after the first visit this is a quiet loading card instead.
+  if (authLoading) return <LoadingScreen label="Checking your session…" />;
   // Waitlist mode: the public site is ONLY the waitlist screen + register.
   // No dashboard tour, no challenge content for non-admins.
   if (settingsLoading) return <LoadingScreen label="Checking cohort status…" />;

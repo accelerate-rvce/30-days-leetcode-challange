@@ -64,6 +64,13 @@ preflight, token validation, and database round trips.
   endpoints.
 - The waitlist setting is re-read every five minutes while visible instead of
   every minute.
+- Tabs switch from local state and update the address bar with
+  `history.pushState`, so no route payload is fetched and no hard reload can
+  interrupt a click. Back/forward and shared `?day=N` links still re-sync the
+  view from the URL. Resources and Support are pure in-bundle views with no
+  fetches, so they render with the same immediate switch.
+- “WELCOME, RVIANS” is a once-per-tab intro (a `sessionStorage` flag). Reloads
+  and remounts go straight to the session/dashboard loading card instead.
 
 ## Verification round trip
 
