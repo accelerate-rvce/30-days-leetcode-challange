@@ -51,6 +51,15 @@ async function launchOpen(req: Request): Promise<boolean> {
   } catch { return false; }
 }
 
+// The registration form and the database trigger both require a handle for
+// students, but an already-authenticated row can predate that rule. Reject
+// attempts and checks at the API boundary so they cannot create verification
+// jobs that are guaranteed to fail with missing_leetcode_username.
+async function canVerifyWithHandle(profileId: string) {
+  const profile = await getPersistentProfile(profileId);
+  return profile?.role === "admin" || Boolean(profile?.leetcode_username?.trim());
+}
+
 router.get("/settings", async (_req, res) => {
   if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
   try {
@@ -125,6 +134,7 @@ router.post("/events/open", async (req, res) => {
   if (!await launchOpen(req)) return res.status(403).json({ error: "launch_not_open" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
   if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  if (!await canVerifyWithHandle(profileId)) return res.status(400).json({ error: "leetcode_username_required" });
   const challenge = await getPersistentChallenge(parsed.data.challengeId);
   if (!challenge) return res.status(404).json({ error: "challenge_not_found" });
   const attempt = await recordPersistentAttempt(profileId, challenge);
@@ -138,6 +148,7 @@ router.post("/verification/request", async (req, res) => {
   if (!await launchOpen(req)) return res.status(403).json({ error: "launch_not_open" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
   if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  if (!await canVerifyWithHandle(profileId)) return res.status(400).json({ error: "leetcode_username_required" });
   await enqueuePersistentVerification(profileId, parsed.data.challengeId);
   // Kick off a verification cycle immediately so 1 accepted LeetCode
   // submission awards points within seconds instead of waiting for the
@@ -471,7 +482,9 @@ router.post("/admin/cohort/reset", async (req, res) => {
       ? "day_one_missing"
       : /reset_cohort/i.test(message) && /(does not exist|not find|schema cache)/i.test(message)
         ? "reset_cohort_migration_required"
-        : "cohort_reset_failed";
+        : /requires a WHERE clause/i.test(message)
+          ? "reset_cohort_safeupdate_required"
+          : "cohort_reset_failed";
     await writeAdminAuditLog(adminId, { action: "reset_cohort", status: "error", message, metadata: { code } }).catch(() => {});
     return res.status(code === "day_one_missing" ? 400 : 500).json({ error: code });
   }

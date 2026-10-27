@@ -11,10 +11,35 @@ jobs:
     steps:
       - name: Wake Render and process a verification batch
         env:
-          BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL }}
+          # The production URL is public. Prefer the repository secret, but fall
+          # back so a missing RENDER_BACKEND_URL alone cannot break verification.
+          BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL || 'https://leet-backend-iwzw.onrender.com' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          test -n "$BACKEND_URL"
-          curl --fail --silent --show-error --max-time 30 \
+          set -euo pipefail
+          BACKEND_URL="${BACKEND_URL%/}"
+          case "$BACKEND_URL" in
+            http://*|https://*) ;;
+            *) BACKEND_URL="https://$BACKEND_URL" ;;
+          esac
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repository secret is not set. Copy the Render CRON_SECRET into the repository secret."
+            exit 1
+          fi
+
+          echo "Waking $BACKEND_URL"
+          curl --fail --silent --show-error --max-time 90 --retry 2 --retry-delay 5 \
+            "$BACKEND_URL/health" > /dev/null
+
+          response="$(curl --silent --show-error --max-time 90 --retry 2 --retry-delay 5 \
+            -w '\n%{http_code}' \
             -H "x-cron-secret: $CRON_SECRET" \
-            -X POST "$BACKEND_URL/api/cron/verify"
+            -X POST "$BACKEND_URL/api/cron/verify")"
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "Verification response ($status): $body"
+
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Verification cron failed with HTTP $status. Check that the Render CRON_SECRET matches the repository secret."
+            exit 1
+          fi

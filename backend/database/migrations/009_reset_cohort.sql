@@ -30,20 +30,24 @@ begin
   v_deadline := v_new_start + interval '24 hours';
   v_delta := v_new_start - v_day_one.published_at;
 
-  delete from verification_jobs;
+  -- Supabase projects may enable pg-safeupdate, which rejects DELETE and
+  -- UPDATE statements without a WHERE clause even inside a function. These
+  -- clauses are deliberately explicit so the reset works in production.
+  delete from verification_jobs where true;
   get diagnostics v_jobs = row_count;
 
-  delete from completions;
+  delete from completions where true;
   get diagnostics v_completions = row_count;
 
-  delete from admin_alerts;
+  delete from admin_alerts where true;
   get diagnostics v_alerts = row_count;
 
   -- Profiles, LeetCode handles, emails, years, and auth accounts stay intact.
   update profiles
   set points = 0,
       streak = 0,
-      longest_streak = 0;
+      longest_streak = 0
+  where true;
   get diagnostics v_profiles = row_count;
 
   -- Never delete challenge rows: the cohort keeps its existing question bank.
@@ -52,7 +56,8 @@ begin
   update challenges
   set published_at = published_at + v_delta,
       deadline_at = deadline_at + v_delta,
-      verification_queued_at = null;
+      verification_queued_at = null
+  where true;
   get diagnostics v_challenges = row_count;
 
   update challenges

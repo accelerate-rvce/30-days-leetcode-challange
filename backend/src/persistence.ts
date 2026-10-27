@@ -278,7 +278,7 @@ export async function getPersistentLeaderboard(query: string) {
 
 async function readLeaderboard(query: string) {
   if (!db) return null;
-  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").order("points", { ascending: false }).order("streak", { ascending: false });
+  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin").order("points", { ascending: false }).order("streak", { ascending: false }).order("name", { ascending: true });
   const safeQuery = query.replace(/[,%()]/g, "");
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
   const [{ data, error }, { data: verifiedCompletions, error: completionError }] = await Promise.all([
@@ -304,7 +304,7 @@ export async function getPersistentAdminMetrics() {
   if (!db) return null;
   const [{ count: participantCount, error: participantError }, { count: verifiedCount, error: verifiedError }, jobs] = await Promise.all([
     db.from("profiles").select("id", { count: "exact", head: true }).neq("role", "admin"),
-    db.from("completions").select("id", { count: "exact", head: true }).eq("status", "verified"),
+    db.from("completions").select("id,profiles!inner(role)", { count: "exact", head: true }).eq("status", "verified").neq("profiles.role", "admin"),
     getPersistentJobMetrics(),
   ]);
   if (participantError) throw participantError;
@@ -319,9 +319,9 @@ export async function getAdminChallenges() {
   return data ?? [];
 }
 
-export async function getAdminUsers(query = "") {
+export async function getAdminUsers(query = "", limit = 1_000) {
   if (!db) return [];
-  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").neq("role", "admin").order("points", { ascending: false }).limit(200);
+  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").neq("role", "admin").order("points", { ascending: false }).limit(limit);
   const safeQuery = query.replace(/[,%()]/g, "");
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
   const [{ data, error }, { data: completions, error: completionError }] = await Promise.all([
@@ -557,7 +557,7 @@ export async function getAdminCompletions(limit = 500) {
   return (data ?? []).map((completion) => ({ ...completion, profile: profileMap.get(completion.profile_id) ?? null, challenge: challengeMap.get(completion.challenge_id) ?? null }));
 }
 
-export async function getAdminVerificationJobs(limit = 100) {
+export async function getAdminVerificationJobs(limit = 500) {
   if (!db) return [];
   const { data, error } = await db.from("verification_jobs").select("id,profile_id,challenge_id,status,attempts,available_at,locked_at,last_error,created_at").order("created_at", { ascending: false }).limit(limit);
   if (error) throw error;
