@@ -283,13 +283,44 @@ async function readLeaderboard(query: string) {
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
   const [{ data, error }, { data: verifiedCompletions, error: completionError }] = await Promise.all([
     request,
-    db.from("completions").select("profile_id").eq("status", "verified"),
+    db.from("completions").select("profile_id,verified_at,submission_at").eq("status", "verified"),
   ]);
   if (error) throw error;
   if (completionError) throw completionError;
   const solvedByProfile = new Map<string, number>();
-  for (const completion of verifiedCompletions ?? []) solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
-  return (data ?? []).map((profile, index) => ({ rank: index + 1, name: profile.name, handle: profile.leetcode_username ?? "", academicYear: profile.academic_year, points: profile.points, streak: profile.streak ?? 0, solved: solvedByProfile.get(profile.id) ?? 0 }));
+  // Ties are broken by who reached the score first, so this keeps the latest
+  // point-earning verification per student.
+  const reachedAtByProfile = new Map<string, number>();
+  for (const completion of verifiedCompletions ?? []) {
+    solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
+    const at = Date.parse(completion.verified_at ?? completion.submission_at ?? "");
+    if (Number.isFinite(at) && at > (reachedAtByProfile.get(completion.profile_id) ?? Number.NEGATIVE_INFINITY)) {
+      reachedAtByProfile.set(completion.profile_id, at);
+    }
+  }
+  const ordered = (data ?? [])
+    .map((profile) => ({
+      name: profile.name,
+      handle: profile.leetcode_username ?? "",
+      academicYear: profile.academic_year,
+      points: profile.points,
+      streak: profile.streak ?? 0,
+      solved: solvedByProfile.get(profile.id) ?? 0,
+      // Missing timestamps sort last inside a tie instead of first.
+      reachedAt: reachedAtByProfile.get(profile.id) ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((left, right) => right.points - left.points || left.reachedAt - right.reachedAt || left.name.localeCompare(right.name));
+  // Equal points share a rank, and the next distinct score takes the next
+  // number (1, 1, 2) so no phantom gaps appear.
+  let rank = 0;
+  let previousPoints: number | null = null;
+  return ordered.map(({ reachedAt: _reachedAt, ...row }) => {
+    if (previousPoints === null || row.points !== previousPoints) {
+      rank += 1;
+      previousPoints = row.points;
+    }
+    return { rank, ...row };
+  });
 }
 
 export async function getPersistentJobMetrics() {
