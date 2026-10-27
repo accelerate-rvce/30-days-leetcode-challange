@@ -545,3 +545,24 @@ button.user-avatar { cursor: pointer; padding: 0; }
 @media (max-width: 680px) { .my-rank { align-items: flex-start; flex-direction: column; gap: 14px; } .my-rank-score { border-bottom: 1px solid var(--line); border-right: 0; padding: 0 0 12px; width: 100%; } .my-rank-stats { gap: 22px; } }
 .profile-button { background: transparent; border: 1px solid var(--line); color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; min-height: 34px; padding: 0 10px; transition: border-color 180ms ease, color 180ms ease; }
 .profile-button:hover, .profile-button.active { border-color: rgba(34, 211, 238, .5); color: var(--accent); }
+/* Live UptimeRobot status card on Support, plus the ranking rule on the board. */
+.ranking-rule { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .08em; margin: 7px 0 0; }
+.status-card .panel-heading { margin-bottom: 0; }
+.uptime-readout { align-items: baseline; display: flex; gap: 10px; margin: 22px 0 14px; }
+.uptime-readout b { color: var(--accent); font-family: var(--font-geist-mono); font-size: 38px; font-weight: 600; letter-spacing: -.06em; }
+.uptime-readout span { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.uptime-strip { display: grid; gap: 3px; grid-template-columns: repeat(30, 1fr); margin: 0 0 12px; }
+.uptime-strip span { background: #1e293b; height: 32px; }
+.uptime-strip .up { background: var(--accent); }
+.uptime-strip .partial { background: #f2bd63; }
+.uptime-strip .down { background: var(--red); }
+.uptime-strip .unknown { background: #1e293b; opacity: .45; }
+.uptime-strip .status-empty { grid-column: 1 / -1; }
+.uptime-note { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; margin: -4px 0 12px; }
+.status-page-link { color: var(--accent); display: inline-block; font-family: var(--font-geist-mono); font-size: 10px; margin-top: 14px; text-decoration: none; }
+.status-page-link:hover, .footer-status:hover { color: #67e8f9; }
+.status-card-copy { margin: 20px 0 0; }
+.status-card-copy a { color: var(--accent); }
+.status-dot.status-dot-warning { background: #f2bd63; }
+.footer-status { color: var(--accent); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .08em; text-decoration: none; }
+@media (max-width: 680px) { .uptime-strip { grid-template-columns: repeat(15, 1fr); } }

@@ -276,28 +276,76 @@ export async function getPersistentLeaderboard(query: string) {
   return cached("leaderboard", 8_000, () => readLeaderboard(""));
 }
 
+// PostgREST caps an unbounded select at the project's max-rows setting, so a
+// 505-student cohort can silently lose solved counts after 1,000 verified
+// completions. Prefer the grouped RPC, with a paged fallback for databases
+// that have not applied migration 015 yet.
+async function readSolvedByProfile() {
+  const solvedByProfile = new Map<string, number>();
+  if (!db) return solvedByProfile;
+  const { data, error } = await db.rpc("leaderboard_verified_counts");
+  if (!error) {
+    for (const row of (data ?? []) as Array<{ profile_id: string; solved: number | string }>) {
+      solvedByProfile.set(row.profile_id, Number(row.solved) || 0);
+    }
+    return solvedByProfile;
+  }
+
+  const pageSize = 1_000;
+  for (let from = 0; ; from += pageSize) {
+    const { data: completions, error: completionError } = await db
+      .from("completions")
+      .select("profile_id")
+      .eq("status", "verified")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (completionError) throw completionError;
+    for (const completion of completions ?? []) {
+      solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
+    }
+    if (!completions || completions.length < pageSize) break;
+  }
+  return solvedByProfile;
+}
+
+async function readReachedAtByProfile() {
+  const reachedAtByProfile = new Map<string, number>();
+  if (!db) return reachedAtByProfile;
+  const pageSize = 1_000;
+  for (let from = 0; ; from += pageSize) {
+    const { data: completions, error } = await db
+      .from("completions")
+      .select("profile_id,verified_at,submission_at")
+      .eq("status", "verified")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    for (const completion of completions ?? []) {
+      const at = Date.parse(completion.verified_at ?? completion.submission_at ?? "");
+      if (Number.isFinite(at) && at > (reachedAtByProfile.get(completion.profile_id) ?? Number.NEGATIVE_INFINITY)) {
+        reachedAtByProfile.set(completion.profile_id, at);
+      }
+    }
+    if (!completions || completions.length < pageSize) break;
+  }
+  return reachedAtByProfile;
+}
+
+const leaderboardCollator = new Intl.Collator("en", { sensitivity: "base" });
+
 async function readLeaderboard(query: string) {
   if (!db) return null;
-  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").order("points", { ascending: false }).order("streak", { ascending: false });
-  const safeQuery = query.replace(/[,%()]/g, "");
-  if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
-  const [{ data, error }, { data: verifiedCompletions, error: completionError }] = await Promise.all([
+  const request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin");
+  const [{ data, error }, solvedByProfile, reachedAtByProfile] = await Promise.all([
     request,
-    db.from("completions").select("profile_id,verified_at,submission_at").eq("status", "verified"),
+    readSolvedByProfile(),
+    readReachedAtByProfile(),
   ]);
   if (error) throw error;
-  if (completionError) throw completionError;
-  const solvedByProfile = new Map<string, number>();
-  // Ties are broken by who reached the score first, so this keeps the latest
-  // point-earning verification per student.
-  const reachedAtByProfile = new Map<string, number>();
-  for (const completion of verifiedCompletions ?? []) {
-    solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
-    const at = Date.parse(completion.verified_at ?? completion.submission_at ?? "");
-    if (Number.isFinite(at) && at > (reachedAtByProfile.get(completion.profile_id) ?? Number.NEGATIVE_INFINITY)) {
-      reachedAtByProfile.set(completion.profile_id, at);
-    }
-  }
+
+  // Students on the same score share a rank (1, 1, 2). Inside a tie, the
+  // student who reached that score first is listed first, so the board rewards
+  // speed without turning equal scores into different ranks.
   const ordered = (data ?? [])
     .map((profile) => ({
       name: profile.name,
@@ -306,36 +354,56 @@ async function readLeaderboard(query: string) {
       points: profile.points,
       streak: profile.streak ?? 0,
       solved: solvedByProfile.get(profile.id) ?? 0,
-      // Missing timestamps sort last inside a tie instead of first.
       reachedAt: reachedAtByProfile.get(profile.id) ?? Number.POSITIVE_INFINITY,
     }))
-    .sort((left, right) => right.points - left.points || left.reachedAt - right.reachedAt || left.name.localeCompare(right.name));
-  // Equal points share a rank, and the next distinct score takes the next
-  // number (1, 1, 2) so no phantom gaps appear.
+    .sort((left, right) =>
+      right.points - left.points
+      || left.reachedAt - right.reachedAt
+      || leaderboardCollator.compare(left.name, right.name)
+      || leaderboardCollator.compare(left.handle, right.handle),
+    );
+
   let rank = 0;
   let previousPoints: number | null = null;
-  return ordered.map(({ reachedAt: _reachedAt, ...row }) => {
+  const ranked = ordered.map(({ reachedAt: _reachedAt, ...row }) => {
     if (previousPoints === null || row.points !== previousPoints) {
       rank += 1;
       previousPoints = row.points;
     }
     return { rank, ...row };
   });
+
+  const safeQuery = query.replace(/[,%()]/g, "").trim().toLowerCase();
+  return ranked.filter((row) => !safeQuery || `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(safeQuery));
 }
 
 export async function getPersistentJobMetrics() {
   if (!db) return null;
-  const { data, error } = await db.from("verification_jobs").select("status");
-  if (error) throw error;
-  const rows = data ?? [];
-  return { queued: rows.filter((row) => row.status === "queued").length, processing: rows.filter((row) => row.status === "processing").length, retrying: rows.filter((row) => row.status === "retry").length, terminalFailures: rows.filter((row) => row.status === "failed").length };
+  // Counting in the database avoids the 1,000-row PostgREST cap once a 505
+  // student cohort accumulates jobs across several days.
+  const statuses = ["queued", "processing", "retry", "failed"] as const;
+  const counts = await Promise.all(statuses.map(async (status) => {
+    const { count, error } = await db!
+      .from("verification_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", status);
+    if (error) throw error;
+    return [status, count ?? 0] as const;
+  }));
+  const byStatus = new Map(counts);
+  return {
+    queued: byStatus.get("queued") ?? 0,
+    processing: byStatus.get("processing") ?? 0,
+    retrying: byStatus.get("retry") ?? 0,
+    terminalFailures: byStatus.get("failed") ?? 0,
+  };
 }
 
 export async function getPersistentAdminMetrics() {
   if (!db) return null;
   const [{ count: participantCount, error: participantError }, { count: verifiedCount, error: verifiedError }, jobs] = await Promise.all([
     db.from("profiles").select("id", { count: "exact", head: true }).neq("role", "admin"),
-    db.from("completions").select("id", { count: "exact", head: true }).eq("status", "verified"),
+    db.from("completions").select("id,profiles!inner(role)", { count: "exact", head: true }).eq("status", "verified").neq("profiles.role", "admin"),
     getPersistentJobMetrics(),
   ]);
   if (participantError) throw participantError;
@@ -350,19 +418,13 @@ export async function getAdminChallenges() {
   return data ?? [];
 }
 
-export async function getAdminUsers(query = "") {
+export async function getAdminUsers(query = "", limit = 1_000) {
   if (!db) return [];
-  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").neq("role", "admin").order("points", { ascending: false }).limit(200);
+  let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").neq("role", "admin").order("points", { ascending: false }).limit(limit);
   const safeQuery = query.replace(/[,%()]/g, "");
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
-  const [{ data, error }, { data: completions, error: completionError }] = await Promise.all([
-    request,
-    db.from("completions").select("profile_id").eq("status", "verified"),
-  ]);
+  const [{ data, error }, solved] = await Promise.all([request, readSolvedByProfile()]);
   if (error) throw error;
-  if (completionError) throw completionError;
-  const solved = new Map<string, number>();
-  for (const completion of completions ?? []) solved.set(completion.profile_id, (solved.get(completion.profile_id) ?? 0) + 1);
   return (data ?? []).map((profile) => ({ ...profile, solved: solved.get(profile.id) ?? 0 }));
 }
 
@@ -588,7 +650,7 @@ export async function getAdminCompletions(limit = 500) {
   return (data ?? []).map((completion) => ({ ...completion, profile: profileMap.get(completion.profile_id) ?? null, challenge: challengeMap.get(completion.challenge_id) ?? null }));
 }
 
-export async function getAdminVerificationJobs(limit = 100) {
+export async function getAdminVerificationJobs(limit = 500) {
   if (!db) return [];
   const { data, error } = await db.from("verification_jobs").select("id,profile_id,challenge_id,status,attempts,available_at,locked_at,last_error,created_at").order("created_at", { ascending: false }).limit(limit);
   if (error) throw error;
@@ -938,6 +1000,16 @@ export async function markPersistentRetry(job: ClaimedJob, errorMessage: string,
     last_error: errorMessage,
     locked_at: null,
   }).eq("id", job.id);
+  // A terminal retry failure (for example a missing handle) must not leave the
+  // completion looking like an open check forever. Never downgrade a row that
+  // another path verified while this job was in flight.
+  if (terminal) {
+    await db.from("completions")
+      .update({ status: "not_verified" })
+      .eq("profile_id", job.profile_id)
+      .eq("challenge_id", job.challenge_id)
+      .neq("status", "verified");
+  }
 }
 
 export async function markPersistentNotFound(job: ClaimedJob, maxRetries: number) {
