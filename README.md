@@ -136,6 +136,16 @@ takes over the screen with a centred Rive mascot. All of it is client-side only:
   because browsers will not start audio from a websocket callback alone. The
   hit falls back to a synthesized chime if the file cannot be fetched.
 
+### LeetCode hand-off
+
+Pressing **Solve on LeetCode** (or **Open on LeetCode** once the attempt is
+recorded) plays `frontend/app/public/sounds/leetcode-whoosh.mp3` first and opens
+LeetCode when the clip ends. The attempt is still recorded in parallel, so the
+whoosh never delays the server write. The clip is primed on mount
+(`primeWhoosh`) and played inside the click gesture (`playWhoosh`); if the
+popup is refused after the delay, the current tab navigates instead so the
+student always lands on the problem.
+
 Realtime requires migration `010_enable_realtime.sql`, which adds `completions`
 to the `supabase_realtime` publication. Row level security already limits each
 signed-in student to their own completions, so Realtime delivers only their row.

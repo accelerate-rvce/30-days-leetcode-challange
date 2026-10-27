@@ -10,6 +10,7 @@ import { Metric } from "./Metric";
 import type { AdminChallenge, AdminCompletion, AdminJob, AdminLog, AdminMetrics, AdminOverview, AdminUser, Challenge, LeaderboardRow, Progress, SiteSettings } from "./dashboard-types";
 import ParticleText from "./ParticleText";
 import { playVerifiedSound, unlockVerifiedSound } from "../lib/verified-sound";
+import { playWhoosh, primeWhoosh } from "../lib/whoosh-sound";
 import { clearDashboardSnapshot, readDashboardSnapshot, readSettingsCache, writeDashboardSnapshot, writeSettingsCache } from "../lib/dashboard-cache";
 
 const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
@@ -234,6 +235,7 @@ export default function ChallengeApp() {
   const [leaderboardQuery, setLeaderboardQuery] = useState("");
   const [attemptRecorded, setAttemptRecorded] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState("");
   const [leetcodeHandle, setLeetcodeHandle] = useState("");
@@ -280,6 +282,9 @@ export default function ChallengeApp() {
   const loadRequest = useRef(0);
   const lastLoadedAt = useRef(0);
   const selectedChallengeRef = useRef("");
+  // Bumped by every in-app navigation so a delayed LeetCode hand-off is dropped
+  // if the student moves on while the whoosh is still playing.
+  const navigationEpoch = useRef(0);
   // Attempts written from this tab that the next progress read may not have
   // seen yet. They keep "Check Now" enabled right after pressing the button.
   const pendingAttempts = useRef<Set<string>>(new Set());
@@ -306,6 +311,7 @@ export default function ChallengeApp() {
   // exists to change the URL — and an RSC fetch that fails makes the app router
   // fall back to a hard reload (losing the session and replaying the intro).
   const navigateTo = (target: View, path: string, day: number | null = null) => {
+    navigationEpoch.current += 1;
     setView(target);
     setRequestedDay(day);
     if (typeof window === "undefined") return;
@@ -390,6 +396,10 @@ export default function ChallengeApp() {
     const timer = window.setTimeout(() => { rememberIntro(); setIntroDone(true); }, 2400);
     return () => window.clearTimeout(timer);
   }, [introSeen]);
+
+  // Fetch the hand-off clip while the dashboard is idle so the whoosh starts on
+  // the click instead of waiting on a network round trip.
+  useEffect(() => { primeWhoosh(); }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -640,38 +650,43 @@ export default function ChallengeApp() {
     else { if (currentUserId) clearDashboardSnapshot(currentUserId); pendingAttempts.current.clear(); setSession(null); setProgress(null); setChallenge(null); setChallenges([]); setNextPublishAt(null); setAdminMetrics(null); setAdminChallenges([]); setAdminUsers([]); setAdminJobs([]); setAdminCompletions([]); setAdminLogs([]); setIsAdmin(false); setOnboardingStage("welcome"); }
   }
 
+  function openLeetcode(url: string) {
+    // A delay for the whoosh outlives the click's transient activation in some
+    // browsers, so fall back to the current tab instead of doing nothing when
+    // the popup is refused.
+    const tab = window.open(url, "_blank");
+    if (!tab) { window.location.assign(url); return; }
+    try { tab.opener = null; } catch { /* cross-origin handoff */ }
+  }
+
   async function recordAndSolve() {
     const selectedChallenge = challengeForSelection();
-    if (!selectedChallenge || !token || recording) return;
+    if (!selectedChallenge || !token || recording || opening) return;
     const leetcodeUrl = `https://leetcode.com/problems/${selectedChallenge.slug}/`;
-    // If already recorded, just (re)open LeetCode without re-posting.
+    const epoch = navigationEpoch.current;
+    // The clip starts inside the click gesture so the browser allows audio.
+    // Recording runs alongside it, and LeetCode opens once the whoosh lands.
+    const whoosh = playWhoosh();
     if (attemptRecorded) {
-      window.open(leetcodeUrl, "_blank", "noopener,noreferrer");
+      setOpening(true);
+      await whoosh;
+      if (navigationEpoch.current === epoch) openLeetcode(leetcodeUrl);
+      setOpening(false);
       return;
     }
-    // Open the tab synchronously inside the click gesture so popup blockers
-    // allow it. We navigate it only after the attempt is safely recorded.
-    const leetcodeTab = window.open("about:blank", "_blank");
-    if (leetcodeTab) leetcodeTab.opener = null;
     setRecording(true); setError(""); setVerifyMessage("");
     try {
       const response = await fetch(`${api}/api/events/open`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ challengeId: selectedChallenge.id }) });
       if (!response.ok) throw new Error("attempt_record_failed");
       pendingAttempts.current.add(selectedChallenge.id);
       setAttemptRecorded(true);
-      if (leetcodeTab && !leetcodeTab.closed) {
-        try { leetcodeTab.location.replace(leetcodeUrl); }
-        catch { setVerifyMessage("Attempt recorded. Use “Open on LeetCode” to continue."); }
-      } else {
-        // Popup blocked: the attempt is recorded, so the now-visible
-        // “Open on LeetCode” button is a direct, user-triggered fallback.
-        setVerifyMessage("Attempt recorded. Use “Open on LeetCode” to continue.");
-      }
+      setOpening(true);
+      await whoosh;
+      if (navigationEpoch.current === epoch) openLeetcode(leetcodeUrl);
     } catch {
-      if (leetcodeTab && !leetcodeTab.closed) leetcodeTab.close();
       setError("We couldn’t record this attempt. Please try again.");
     }
-    finally { setRecording(false); }
+    finally { setRecording(false); setOpening(false); }
   }
 
   async function checkSubmission() {
@@ -836,7 +851,7 @@ export default function ChallengeApp() {
 
   return <div className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateTo(item.id, item.path)}>{item.label}</button>)}</nav><div className="top-actions"><button type="button" className="user-avatar" onClick={() => navigateTo("profile", "/profile")} aria-label="Open your profile" title="Your profile">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</button><button type="button" className={`profile-button ${view === "profile" ? "active" : ""}`} onClick={() => navigateTo("profile", "/profile")} aria-current={view === "profile" ? "page" : undefined}>Profile</button><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? (viewingPastDay ? "This day has closed. A late solve still earns points on your record." : "Today’s problem is ready when you are.") : view === "progress" ? "A clear record of the work you have actually verified." : view === "profile" ? "Your name, streak, and the LeetCode profile we verify." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
     {view === "overview" && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); navigateTo("challenge", "/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} currentChallenge={challenge} onSelect={(id) => { const item = challenges.find((candidate) => candidate.id === id); setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((entry) => entry.challenge_id === id) ?? false); setVerifyMessage(""); navigateTo("challenge", item ? `/challenge?day=${item.day}` : "/challenge", item?.day ?? null); }} /></>}
-    {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} attemptRecorded={attemptRecorded} recording={recording} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={selectedStatus?.status ?? null} verificationJob={selectedStatus?.verification ?? null} awardedPoints={selectedStatus?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
+    {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} attemptRecorded={attemptRecorded} recording={recording} opening={opening} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={selectedStatus?.status ?? null} verificationJob={selectedStatus?.verification ?? null} awardedPoints={selectedStatus?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
     {view === "progress" && <ProgressView progress={progress} verifiedCount={verified.length} challenges={challenges} />}
     {view === "profile" && <ProfileView progress={progress} email={session.user.email ?? ""} name={waitlistName} handle={leetcodeHandle} academicYear={academicYear} saving={profileSaving} error={profileError} notice={profileNotice} onName={setWaitlistName} onHandle={setLeetcodeHandle} onYear={setAcademicYear} onSave={updateProfile} />}
     {view === "leaderboard" && <Leaderboard rows={leaderboard} query={leaderboardQuery} setQuery={setLeaderboardQuery} me={progress.profile.leetcode_username ?? ""} myName={progress.profile.name} />}
@@ -912,10 +927,11 @@ function ProfileView({ progress, email, name, handle, academicYear, saving, erro
 function ChallengeCard({ challenge, onOpen }: { challenge: Challenge | null; onOpen: () => void }) { return <article className="panel challenge-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY’S QUESTION {challenge && <span className="muted">· DAY {String(challenge.day).padStart(2, "0")}</span>}</div><h2>{challenge?.title ?? "No challenge published"}</h2></div>{challenge && <span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()}</span>}</div>{challenge ? <><div className="problem-meta"><span><b>{challenge.slug.toUpperCase()}</b> PROBLEM ID</span><span><b>{challenge.points} PTS</b> AVAILABLE</span><span><b>{formatTime(challenge.deadlineAt)} IST</b> DEADLINE</span></div><p className="challenge-privacy-note"><strong>Curate your profile:</strong> turn on <b>Recent AC Problems and Submission Details</b> and <b>Submission Heatmap</b> in <a href="https://leetcode.com/settings/profile/" target="_blank" rel="noreferrer">LeetCode privacy settings</a> so we can verify your solve.</p><button className="primary-button" onClick={onOpen}>Open question <span>→</span></button></> : <p className="empty-copy">The next challenge will appear here when it is published.</p>}</article>; }
 function ChallengeHistory({ challenges, currentChallenge, onSelect }: { challenges: Challenge[]; currentChallenge: Challenge | null; onSelect: (id: string) => void }) { const currentDay = currentChallenge?.day ?? 31; const past = challenges.filter((item) => item.id !== currentChallenge?.id && item.day < currentDay); return <article className="panel activity-panel"><div className="eyebrow">CHALLENGE HISTORY</div><h2>Complete a missed challenge</h2>{past.length === 0 ? <p className="empty-copy">No earlier challenges are available.</p> : <div className="activity-list">{past.map((item) => <div className="activity-row" key={item.id}><span className="question-day">DAY {String(item.day).padStart(2, "0")}</span><div><strong>{item.title}</strong><p>Late completion · 70 points</p></div><button className="text-button" onClick={() => onSelect(item.id)}>Open →</button></div>)}</div>}</article>; }
 function StreakTracker({ challenges, progress, currentChallenge }: { challenges: Challenge[]; progress: Progress | null; currentChallenge: Challenge | null }) { const completedDays = new Set((progress?.statuses ?? []).filter((item) => item.status === "verified").map((item) => challenges.find((challenge) => challenge.id === item.challenge_id)?.day).filter((day): day is number => typeof day === "number")); return <article className="panel tracker-panel"><div className="panel-heading"><div><div className="eyebrow">STREAK TRACKER</div><h2>30 days in motion</h2></div><span className="tracker-count">{progress?.profile.streak ?? 0} <small>/ 30</small></span></div><div className="day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; return <span key={day} className={completedDays.has(day) ? "complete" : currentChallenge?.day === day ? "today" : ""}>{String(day).padStart(2, "0")}</span>; })}</div><div className="tracker-foot"><span><span className="legend complete" /> verified</span><span><span className="legend today" /> current</span><span>next challenge at 00:00 IST</span></div></article>; }
-function ChallengeDetail({ challenge, attemptRecorded, recording, verifying, verifyMessage, verificationStatus, verificationJob, awardedPoints, onSolve, onVerify }: {
+function ChallengeDetail({ challenge, attemptRecorded, recording, opening, verifying, verifyMessage, verificationStatus, verificationJob, awardedPoints, onSolve, onVerify }: {
   challenge: Challenge | null;
   attemptRecorded: boolean;
   recording: boolean;
+  opening: boolean;
   verifying: boolean;
   verifyMessage: string;
   verificationStatus: string | null;
@@ -943,7 +959,7 @@ function ChallengeDetail({ challenge, attemptRecorded, recording, verifying, ver
   const busy = verifying || pending;
   const checkLabel = verifying ? "Queued…" : jobStatus === "processing" ? "Checking…" : pending ? "Queued…" : "Check Now";
 
-  return <section className="challenge-detail-layout"><article className="panel challenge-detail"><div className="eyebrow"><span className="accent-dot" /> DAY {String(challenge.day).padStart(2, "0")} · PUBLISHED {formatTime(challenge.publishedAt)} IST</div><div className="detail-title-row"><div><h2>{challenge.title}</h2><p className="slug">leetcode.com/problems/{challenge.slug}</p></div><span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()} · {challenge.points} PTS</span></div>{!isVerified && <div className="verification-callout"><strong>Curate your profile</strong><p>Control what opens to the public. Both of these must be on:</p><ul className="privacy-rows"><li><span>Recent AC Problems and Submission Details</span><b>On</b></li><li><span>Submission Heatmap</span><b>On</b></li></ul><p>If either is off, we can’t see your accepted submissions and can’t award points. <a href="https://leetcode.com/settings/profile/" target="_blank" rel="noreferrer">Open LeetCode privacy settings ↗</a></p></div>}<div className="detail-actions"><button className="primary-button" onClick={onSolve} disabled={recording}>{recording ? "Recording…" : attemptRecorded ? "Open on LeetCode" : "Solve on LeetCode"} <span>↗</span></button>{attemptRecorded && !isVerified && <button className="secondary-button" onClick={onVerify} disabled={busy}>{checkLabel}</button>}{attemptRecorded && !isVerified && pending && jobStatus === "retry" && <button type="button" className="text-button" onClick={onVerify}>Solved it? Check now</button>}{isVerified && <span className="verification recorded">✓ VERIFIED +{awardedPoints ?? challenge.points} PTS</span>}{!isVerified && !attemptRecorded && <span className="verification">○ NOT ATTEMPTED</span>}</div>{message && <p className="empty-copy" role="status">{message}</p>}{isVerified && <p className="empty-copy">1 accepted submission = points credited once. Re-submissions never award duplicates.</p>}</article><aside className="panel deadline-card"><div className="eyebrow">VERIFICATION WINDOW</div><div className="countdown" role="timer" aria-label="Time remaining until the deadline">{formatCountdown(challenge.deadlineAt, now)}</div><p>Deadline · {formatDate(challenge.deadlineAt)}</p><div className="status-list"><div><span className={attemptRecorded ? "status-dot" : "muted-dot"} /> Attempt recorded <b>{attemptRecorded ? "yes" : "pending"}</b></div><div><span className={isVerified || pending ? "status-dot" : "muted-dot"} /> Submission check <b>{isVerified ? "verified" : pending ? (jobStatus === "processing" ? "checking" : "queued") : "1 Accepted = points"}</b></div><div><span className="muted-dot" /> Points <b>{challenge.points} pts</b></div></div></aside></section>;
+  return <section className="challenge-detail-layout"><article className="panel challenge-detail"><div className="eyebrow"><span className="accent-dot" /> DAY {String(challenge.day).padStart(2, "0")} · PUBLISHED {formatTime(challenge.publishedAt)} IST</div><div className="detail-title-row"><div><h2>{challenge.title}</h2><p className="slug">leetcode.com/problems/{challenge.slug}</p></div><span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()} · {challenge.points} PTS</span></div>{!isVerified && <div className="verification-callout"><strong>Curate your profile</strong><p>Control what opens to the public. Both of these must be on:</p><ul className="privacy-rows"><li><span>Recent AC Problems and Submission Details</span><b>On</b></li><li><span>Submission Heatmap</span><b>On</b></li></ul><p>If either is off, we can’t see your accepted submissions and can’t award points. <a href="https://leetcode.com/settings/profile/" target="_blank" rel="noreferrer">Open LeetCode privacy settings ↗</a></p></div>}<div className="detail-actions"><button className="primary-button" onClick={onSolve} disabled={recording || opening}>{recording ? "Recording…" : opening ? "Opening LeetCode…" : attemptRecorded ? "Open on LeetCode" : "Solve on LeetCode"} <span>↗</span></button>{attemptRecorded && !isVerified && <button className="secondary-button" onClick={onVerify} disabled={busy}>{checkLabel}</button>}{attemptRecorded && !isVerified && pending && jobStatus === "retry" && <button type="button" className="text-button" onClick={onVerify}>Solved it? Check now</button>}{isVerified && <span className="verification recorded">✓ VERIFIED +{awardedPoints ?? challenge.points} PTS</span>}{!isVerified && !attemptRecorded && <span className="verification">○ NOT ATTEMPTED</span>}</div>{message && <p className="empty-copy" role="status">{message}</p>}{isVerified && <p className="empty-copy">1 accepted submission = points credited once. Re-submissions never award duplicates.</p>}</article><aside className="panel deadline-card"><div className="eyebrow">VERIFICATION WINDOW</div><div className="countdown" role="timer" aria-label="Time remaining until the deadline">{formatCountdown(challenge.deadlineAt, now)}</div><p>Deadline · {formatDate(challenge.deadlineAt)}</p><div className="status-list"><div><span className={attemptRecorded ? "status-dot" : "muted-dot"} /> Attempt recorded <b>{attemptRecorded ? "yes" : "pending"}</b></div><div><span className={isVerified || pending ? "status-dot" : "muted-dot"} /> Submission check <b>{isVerified ? "verified" : pending ? (jobStatus === "processing" ? "checking" : "queued") : "1 Accepted = points"}</b></div><div><span className="muted-dot" /> Points <b>{challenge.points} pts</b></div></div></aside></section>;
 }
 function mergeCompletionStatus(statuses: Progress["statuses"], row: { challenge_id: string; status: string; awarded_points?: number }) {
   const existing = statuses.find((item) => item.challenge_id === row.challenge_id);
