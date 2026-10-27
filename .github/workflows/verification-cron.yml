@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+  # Run once when the workflow itself changes so secret/config regressions are
+  # visible immediately instead of waiting for GitHub's best-effort schedule.
+  push:
+    paths:
+      - .github/workflows/verification-cron.yml
 
 jobs:
   verify:
