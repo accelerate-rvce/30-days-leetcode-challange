@@ -140,8 +140,7 @@ takes over the screen with a centred Rive mascot. All of it is client-side only:
 
 Every click in the app plays `frontend/app/public/sounds/click.mp3` from a
 capture-phase listener registered in `ChallengeApp` (`lib/click-sound.ts`). A
-four-voice pool lets rapid clicks overlap; the clip is trimmed to one 120ms
-tick so the preview's second click and lead-in silence do not double up.
+four-voice pool lets rapid clicks overlap instead of cutting each other off.
 
 ### LeetCode hand-off
 
