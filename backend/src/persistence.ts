@@ -276,28 +276,68 @@ export async function getPersistentLeaderboard(query: string) {
   return cached("leaderboard", 8_000, () => readLeaderboard(""));
 }
 
+// PostgREST caps an unbounded select at the project's max-rows setting, so a
+// 505-student cohort can silently lose solved counts after 1,000 verified
+// completions. Prefer the grouped RPC, with a paged fallback for databases
+// that have not applied migration 015 yet.
+async function readSolvedByProfile() {
+  const solvedByProfile = new Map<string, number>();
+  if (!db) return solvedByProfile;
+  const { data, error } = await db.rpc("leaderboard_verified_counts");
+  if (!error) {
+    for (const row of (data ?? []) as Array<{ profile_id: string; solved: number | string }>) {
+      solvedByProfile.set(row.profile_id, Number(row.solved) || 0);
+    }
+    return solvedByProfile;
+  }
+
+  const pageSize = 1_000;
+  for (let from = 0; ; from += pageSize) {
+    const { data: completions, error: completionError } = await db
+      .from("completions")
+      .select("profile_id")
+      .eq("status", "verified")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (completionError) throw completionError;
+    for (const completion of completions ?? []) {
+      solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
+    }
+    if (!completions || completions.length < pageSize) break;
+  }
+  return solvedByProfile;
+}
+
 async function readLeaderboard(query: string) {
   if (!db) return null;
   let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin").order("points", { ascending: false }).order("streak", { ascending: false }).order("name", { ascending: true });
   const safeQuery = query.replace(/[,%()]/g, "");
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
-  const [{ data, error }, { data: verifiedCompletions, error: completionError }] = await Promise.all([
-    request,
-    db.from("completions").select("profile_id").eq("status", "verified"),
-  ]);
+  const [{ data, error }, solvedByProfile] = await Promise.all([request, readSolvedByProfile()]);
   if (error) throw error;
-  if (completionError) throw completionError;
-  const solvedByProfile = new Map<string, number>();
-  for (const completion of verifiedCompletions ?? []) solvedByProfile.set(completion.profile_id, (solvedByProfile.get(completion.profile_id) ?? 0) + 1);
   return (data ?? []).map((profile, index) => ({ rank: index + 1, name: profile.name, handle: profile.leetcode_username ?? "", academicYear: profile.academic_year, points: profile.points, streak: profile.streak ?? 0, solved: solvedByProfile.get(profile.id) ?? 0 }));
 }
 
 export async function getPersistentJobMetrics() {
   if (!db) return null;
-  const { data, error } = await db.from("verification_jobs").select("status");
-  if (error) throw error;
-  const rows = data ?? [];
-  return { queued: rows.filter((row) => row.status === "queued").length, processing: rows.filter((row) => row.status === "processing").length, retrying: rows.filter((row) => row.status === "retry").length, terminalFailures: rows.filter((row) => row.status === "failed").length };
+  // Counting in the database avoids the 1,000-row PostgREST cap once a 505
+  // student cohort accumulates jobs across several days.
+  const statuses = ["queued", "processing", "retry", "failed"] as const;
+  const counts = await Promise.all(statuses.map(async (status) => {
+    const { count, error } = await db!
+      .from("verification_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", status);
+    if (error) throw error;
+    return [status, count ?? 0] as const;
+  }));
+  const byStatus = new Map(counts);
+  return {
+    queued: byStatus.get("queued") ?? 0,
+    processing: byStatus.get("processing") ?? 0,
+    retrying: byStatus.get("retry") ?? 0,
+    terminalFailures: byStatus.get("failed") ?? 0,
+  };
 }
 
 export async function getPersistentAdminMetrics() {
@@ -324,14 +364,8 @@ export async function getAdminUsers(query = "", limit = 1_000) {
   let request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role").neq("role", "admin").order("points", { ascending: false }).limit(limit);
   const safeQuery = query.replace(/[,%()]/g, "");
   if (safeQuery) request = request.or(`name.ilike.%${safeQuery}%,leetcode_username.ilike.%${safeQuery}%`);
-  const [{ data, error }, { data: completions, error: completionError }] = await Promise.all([
-    request,
-    db.from("completions").select("profile_id").eq("status", "verified"),
-  ]);
+  const [{ data, error }, solved] = await Promise.all([request, readSolvedByProfile()]);
   if (error) throw error;
-  if (completionError) throw completionError;
-  const solved = new Map<string, number>();
-  for (const completion of completions ?? []) solved.set(completion.profile_id, (solved.get(completion.profile_id) ?? 0) + 1);
   return (data ?? []).map((profile) => ({ ...profile, solved: solved.get(profile.id) ?? 0 }));
 }
 
