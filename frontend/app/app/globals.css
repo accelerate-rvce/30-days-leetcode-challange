@@ -83,6 +83,7 @@ button { cursor: pointer; }
 .slug, code { color: var(--accent); font-family: var(--font-geist-mono); font-size: 11px; }
 .detail-title-row .difficulty { margin-top: 9px; }
 .challenge-detail > p { font-size: 16px; max-width: 700px; }
+.challenge-detail > .empty-copy { font-size: 13px; margin-top: 18px; max-width: 640px; }
 .example-box { background: var(--background); border-left: 2px solid var(--accent); display: grid; gap: 9px; margin: 28px 0; padding: 18px; }
 .example-box span { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .12em; }.example-box strong { font-family: var(--font-geist-mono); font-size: 12px; font-weight: 500; }.example-box small { color: var(--muted); font-size: 12px; }
 .detail-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 16px; }.verification { color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; }.verification.recorded { color: var(--accent); }
