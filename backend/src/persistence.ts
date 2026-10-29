@@ -267,13 +267,23 @@ export async function recalculateProfileStreak(profileId: string) {
   return { current, longest };
 }
 
-export async function getPersistentLeaderboard(query: string) {
+export async function getPersistentLeaderboard(query: string, includeProfileId?: string) {
   const normalized = query.trim();
   // The unfiltered board is the same for every student and is requested on
   // every page load, so a few seconds of caching removes the whole-table scan
   // from most requests. Search results are one-off; skip the cache for them.
-  if (normalized) return readLeaderboard(normalized);
-  return cached("leaderboard", 8_000, () => readLeaderboard(""));
+  const sorted = normalized
+    ? await readSortedLeaderboard()
+    : await cached("leaderboard", 8_000, readSortedLeaderboard);
+  if (!sorted) return null;
+
+  // Staff accounts stay off the public board, but the signed-in admin still
+  // gets their own row (and rank) in their copy of it.
+  const visible = sorted.filter((row) => row.role !== "admin" || row.id === includeProfileId);
+  const safeQuery = normalized.replace(/[,%()]/g, "").toLowerCase();
+  return visible
+    .map(({ role: _role, ...row }, index) => ({ ...row, rank: index + 1 }))
+    .filter((row) => !safeQuery || `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(safeQuery));
 }
 
 // PostgREST caps an unbounded select at the project's max-rows setting, so a
@@ -333,40 +343,41 @@ async function readSubmittedAtByProfile() {
 
 const leaderboardCollator = new Intl.Collator("en", { sensitivity: "base" });
 
-async function readLeaderboard(query: string) {
+// Rank every student uniquely: points first, then the current streak, then the
+// earlier latest submission. Name is only a deterministic final fallback when
+// two students have identical scores, streaks, and submission times.
+//
+// Admins are included in this sorted list so the signed-in staff member can
+// still see their own standing; the public board filters them out per request.
+async function readSortedLeaderboard() {
   if (!db) return null;
-  const request = db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak").neq("role", "admin");
   const [{ data, error }, solvedByProfile, submittedAtByProfile] = await Promise.all([
-    request,
+    db.from("profiles").select("id,name,leetcode_username,academic_year,points,streak,role"),
     readSolvedByProfile(),
     readSubmittedAtByProfile(),
   ]);
   if (error) throw error;
 
-  // Rank every student uniquely: points first, then the current streak, then
-  // the earlier latest submission. Name is only a deterministic final fallback
-  // when two students have identical scores, streaks, and submission times.
-  const rows = (data ?? []).map((profile) => ({
-    name: profile.name,
-    handle: profile.leetcode_username ?? "",
-    academicYear: profile.academic_year,
-    points: profile.points,
-    streak: profile.streak ?? 0,
-    solved: solvedByProfile.get(profile.id) ?? 0,
-    submittedAt: submittedAtByProfile.get(profile.id) ?? Number.POSITIVE_INFINITY,
-  }));
-  rows.sort((left, right) =>
-    right.points - left.points
-    || right.streak - left.streak
-    || left.submittedAt - right.submittedAt
-    || leaderboardCollator.compare(left.name, right.name)
-    || leaderboardCollator.compare(left.handle, right.handle),
-  );
-
-  const safeQuery = query.replace(/[,%()]/g, "").trim().toLowerCase();
-  return rows
-    .map(({ submittedAt: _submittedAt, ...row }, index) => ({ ...row, rank: index + 1 }))
-    .filter((row) => !safeQuery || `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(safeQuery));
+  return (data ?? [])
+    .map((profile) => ({
+      id: profile.id as string,
+      name: profile.name as string,
+      handle: profile.leetcode_username ?? "",
+      academicYear: profile.academic_year as string,
+      points: profile.points as number,
+      streak: profile.streak ?? 0,
+      solved: solvedByProfile.get(profile.id) ?? 0,
+      role: (profile.role as string | null) ?? "student",
+      submittedAt: submittedAtByProfile.get(profile.id) ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((left, right) =>
+      right.points - left.points
+      || right.streak - left.streak
+      || left.submittedAt - right.submittedAt
+      || leaderboardCollator.compare(left.name, right.name)
+      || leaderboardCollator.compare(left.handle, right.handle),
+    )
+    .map(({ submittedAt: _submittedAt, ...row }) => row);
 }
 
 export async function getPersistentJobMetrics() {

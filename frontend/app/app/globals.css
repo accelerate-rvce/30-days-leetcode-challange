@@ -545,6 +545,49 @@ button.user-avatar { cursor: pointer; padding: 0; }
 @media (max-width: 680px) { .my-rank { align-items: flex-start; flex-direction: column; gap: 14px; } .my-rank-score { border-bottom: 1px solid var(--line); border-right: 0; padding: 0 0 12px; width: 100%; } .my-rank-stats { gap: 22px; } }
 .profile-button { background: transparent; border: 1px solid var(--line); color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; min-height: 34px; padding: 0 10px; transition: border-color 180ms ease, color 180ms ease; }
 .profile-button:hover, .profile-button.active { border-color: rgba(34, 211, 238, .5); color: var(--accent); }
+.sound-control { position: relative; }
+.sound-button { align-items: center; background: transparent; border: 1px solid var(--line); color: var(--muted); display: flex; height: 34px; justify-content: center; transition: border-color 180ms ease, color 180ms ease; width: 34px; }
+.sound-button:hover, .sound-button.active { border-color: rgba(34, 211, 238, .5); color: var(--accent); }
+.sound-panel { background: #0a0f1a; border: 1px solid var(--line); box-shadow: 0 20px 45px rgba(0, 0, 0, .5); padding: 14px; position: absolute; right: 0; top: calc(100% + 10px); width: 276px; z-index: 20; }
+.sound-panel-head { align-items: center; color: var(--muted); display: flex; font-family: var(--font-geist-mono); font-size: 9px; justify-content: space-between; letter-spacing: .13em; padding-bottom: 10px; }
+.sound-panel-head span { color: var(--accent); }
+.sound-row { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 14px; justify-content: space-between; padding: 10px 0; }
+.sound-row-copy strong { color: var(--soft); display: block; font-family: var(--font-geist-mono); font-size: 10px; font-weight: 600; letter-spacing: .02em; }
+.sound-row-copy small { color: var(--muted); display: block; font-family: var(--font-geist-mono); font-size: 9px; line-height: 1.4; margin-top: 3px; }
+.sound-row.master .sound-row-copy strong { color: var(--foreground); font-size: 11px; }
+.sound-channels { transition: opacity 180ms ease; }
+.sound-channels.muted { opacity: .45; }
+.sound-switch { background: #0f1726; border: 1px solid var(--line); border-radius: 999px; flex: 0 0 auto; height: 18px; position: relative; transition: background 180ms ease, border-color 180ms ease; width: 34px; }
+.sound-switch::after { background: var(--muted); border-radius: 50%; content: ""; height: 12px; left: 2px; position: absolute; top: 2px; transition: background 180ms ease, transform 180ms var(--ease-out); width: 12px; }
+.sound-switch[aria-checked="true"] { background: rgba(34, 211, 238, .16); border-color: rgba(34, 211, 238, .55); }
+.sound-switch[aria-checked="true"]::after { background: var(--accent); transform: translateX(16px); }
+.sound-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sound-volume { border-top: 1px solid var(--line); padding: 11px 0 12px; transition: opacity 180ms ease; }
+.sound-volume.muted { opacity: .45; }
+.sound-volume-head { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
+.sound-volume-value { color: var(--accent); font-family: var(--font-geist-mono); font-size: 10px; }
+.sound-volume-track { align-items: center; display: flex; gap: 8px; margin-top: 11px; }
+.sound-step { background: var(--background); border: 1px solid var(--line); color: var(--soft); flex: 0 0 auto; font-family: var(--font-geist-mono); font-size: 13px; height: 24px; line-height: 1; transition: border-color 180ms ease, color 180ms ease; width: 24px; }
+.sound-step:hover { border-color: rgba(34, 211, 238, .5); color: var(--accent); }
+.sound-range { -webkit-appearance: none; appearance: none; background: transparent; flex: 1; height: 16px; min-width: 0; outline: 0; }
+.sound-range::-webkit-slider-runnable-track { background: #1e293b; height: 3px; }
+.sound-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; background: var(--accent); border: 0; border-radius: 50%; cursor: pointer; height: 12px; margin-top: -4.5px; width: 12px; }
+.sound-range::-moz-range-track { background: #1e293b; height: 3px; }
+.sound-range::-moz-range-thumb { background: var(--accent); border: 0; border-radius: 50%; cursor: pointer; height: 12px; width: 12px; }
+.sound-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+.sound-announcement { align-items: center; animation: celebration-fade 240ms ease-out both; background: rgba(2, 4, 10, .8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; inset: 0; justify-content: center; padding: 20px; position: fixed; z-index: 80; }
+.sound-announcement-panel { animation: celebration-in 420ms var(--ease-out) both; background: linear-gradient(150deg, var(--panel-high), var(--panel) 70%); border: 1px solid rgba(34, 211, 238, .34); box-shadow: 0 40px 120px rgba(2, 6, 18, .82), 0 0 0 1px rgba(34, 211, 238, .06) inset; max-width: 470px; padding: clamp(24px, 4vw, 34px); position: relative; width: 100%; }
+.sound-announcement-badge { border: 1px solid rgba(34, 211, 238, .35); color: var(--accent); display: inline-block; font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .13em; padding: 5px 7px; }
+.sound-announcement-panel h2 { font-family: var(--font-geist-sans); font-size: clamp(24px, 4vw, 31px); letter-spacing: -.045em; line-height: 1.05; margin: 18px 0 10px; }
+.sound-announcement-panel p { color: var(--muted); font-size: 13px; line-height: 1.65; margin: 0 0 20px; }
+.sound-announcement-volume { border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); padding: 14px 0; }
+.sound-announcement-volume span { color: var(--muted); display: flex; font-family: var(--font-geist-mono); font-size: 9px; justify-content: space-between; letter-spacing: .12em; }
+.sound-announcement-volume b { color: var(--accent); font-weight: 600; }
+.sound-announcement-volume .sound-range { margin-top: 13px; width: 100%; }
+.sound-announcement-actions { align-items: center; display: flex; gap: 10px; margin-top: 20px; }
+.sound-announcement-actions .primary-button { margin-left: auto; }
+.sound-announcement-hint { color: var(--muted); display: block; font-family: var(--font-geist-mono); font-size: 9px; line-height: 1.5; margin-top: 14px; }
+@media (max-width: 480px) { .sound-announcement-actions { align-items: stretch; flex-direction: column-reverse; } .sound-announcement-actions .primary-button { margin-left: 0; width: 100%; } .sound-announcement-actions .secondary-button { margin-top: 0; width: 100%; } }
 /* Live UptimeRobot status card on Support, plus the ranking rule on the board. */
 .ranking-rule { color: var(--muted); font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .08em; margin: 7px 0 0; }
 .status-card .panel-heading { margin-bottom: 0; }

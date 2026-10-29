@@ -83,7 +83,7 @@ router.get("/bootstrap", async (req, res) => {
     const [settings, progress, leaderboard, challenge, challenges, nextPublishAt] = await Promise.all([
       getSiteSettings(),
       getPersistentProgress(profileId),
-      getPersistentLeaderboard(""),
+      getPersistentLeaderboard("", profileId),
       getPersistentCurrentChallenge(),
       getPersistentChallenges(),
       getNextChallengePublishAt(),

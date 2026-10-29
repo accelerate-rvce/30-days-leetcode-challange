@@ -4,9 +4,11 @@
 // the visitor interacts, so a blocked play is re-armed and fires on the first
 // pointer press or key stroke instead of being dropped. Plays once per page
 // load; client-side navigation never restarts it.
+import { getSoundVolume, isSoundEnabled } from "./sound-settings";
+
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
 const source = `${basePath}/indian-percussion-ident-om-fx-1-00-04.mp3`;
-const volume = 0.45;
+const baseVolume = 0.45;
 
 let element: HTMLAudioElement | null = null;
 let played = false;
@@ -17,7 +19,7 @@ function getElement() {
   if (!element) {
     element = new Audio(source);
     element.preload = "auto";
-    element.volume = volume;
+    element.volume = baseVolume;
   }
   return element;
 }
@@ -43,8 +45,10 @@ function onFirstGesture() {
 
 function attempt() {
   if (played) return;
+  if (!isSoundEnabled("entrance")) { disarm(); return; }
   const audio = getElement();
   if (!audio) return;
+  audio.volume = Math.min(1, baseVolume * getSoundVolume());
   const playback = audio.play();
   if (!playback) { arm(); return; }
   playback.then(() => { played = true; disarm(); }).catch(() => { arm(); });
@@ -53,6 +57,7 @@ function attempt() {
 /** Starts the ident now, or on the first interaction if autoplay is blocked. */
 export function playSiteEntrance() {
   if (played) return;
+  if (!isSoundEnabled("entrance")) return;
   const audio = getElement();
   if (audio) audio.load();
   attempt();

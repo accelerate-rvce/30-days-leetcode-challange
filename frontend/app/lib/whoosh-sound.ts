@@ -5,8 +5,11 @@
 // gesture itself, so autoplay policies allow it; `playWhoosh` resolves when the
 // clip is over (or immediately gives up if the file cannot play) so the caller
 // can navigate afterwards without leaving a silent gap.
+import { getSoundVolume, isSoundEnabled } from "./sound-settings";
+
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
 const source = `${basePath}/sounds/leetcode-whoosh.mp3`;
+const baseVolume = 0.7;
 
 const fallbackDelayMs = 600;
 
@@ -17,7 +20,7 @@ function getElement() {
   if (!element) {
     element = new Audio(source);
     element.preload = "auto";
-    element.volume = 0.7;
+    element.volume = baseVolume;
   }
   return element;
 }
@@ -44,8 +47,11 @@ export function primeWhoosh() {
  * LeetCode hand-off still feels intentional.
  */
 export function playWhoosh(): Promise<void> {
+  // With the hand-off sound switched off, open LeetCode straight away.
+  if (!isSoundEnabled("handoff")) return Promise.resolve();
   const audio = getElement();
   if (!audio) return Promise.resolve();
+  audio.volume = Math.min(1, baseVolume * getSoundVolume());
   try { audio.currentTime = 0; } catch { /* not seekable yet */ }
   const playback = audio.play();
   if (!playback) return wait(fallbackDelayMs);

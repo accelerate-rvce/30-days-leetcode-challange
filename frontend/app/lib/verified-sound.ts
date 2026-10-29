@@ -13,6 +13,8 @@
 // needs the audio unlocked while the "Check Now" gesture is still fresh.
 // `unlockVerifiedSound` runs in the click handler and decodes both files;
 // `playVerifiedSound` / `startCelebrationMusic` run seconds later.
+import { getSoundVolume, isSoundEnabled, subscribeSoundSettings } from "./sound-settings";
+
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
 const tracks = {
   hit: `${basePath}/sounds/verified-celebration.wav`,
@@ -69,6 +71,7 @@ async function runningContext(): Promise<AudioContext | null> {
 }
 
 export function unlockVerifiedSound() {
+  if (!isSoundEnabled("celebration")) return;
   const ctx = getContext();
   if (!ctx) return;
   if (ctx.state === "suspended") void ctx.resume().catch(() => {});
@@ -86,6 +89,8 @@ const revealAfterMs = 3_000;
  * when the clip actually ends.
  */
 export async function playVerifiedSound(): Promise<void> {
+  // Muted: skip the hit entirely so the mascot appears without the wait.
+  if (!isSoundEnabled("celebration")) return;
   const ctx = await Promise.race([runningContext(), delay(1_500).then(() => null)]);
   if (!ctx) return;
   const buffer = await bufferFor(ctx, "hit");
@@ -95,7 +100,7 @@ export async function playVerifiedSound(): Promise<void> {
     return;
   }
   const gain = ctx.createGain();
-  gain.gain.value = 0.6;
+  gain.gain.value = 0.6 * getSoundVolume();
   const playback = ctx.createBufferSource();
   playback.buffer = buffer;
   playback.connect(gain);
@@ -113,13 +118,14 @@ export async function playVerifiedSound(): Promise<void> {
 
 /** Loops the mascot music until `stopCelebrationMusic` is called. */
 export async function startCelebrationMusic(): Promise<void> {
+  if (!isSoundEnabled("celebration")) return;
   const ctx = await runningContext();
   if (!ctx) return;
   const buffer = await bufferFor(ctx, "party");
   if (!buffer) return;
   stopCelebrationMusic();
   const gain = ctx.createGain();
-  gain.gain.value = 0.5;
+  gain.gain.value = 0.5 * getSoundVolume();
   const playback = ctx.createBufferSource();
   playback.buffer = buffer;
   playback.loop = true;
@@ -142,6 +148,12 @@ export function stopCelebrationMusic() {
   }
 }
 
+// Switching sound off mid-celebration should silence the loop immediately,
+// not when the overlay is dismissed.
+subscribeSoundSettings((settings) => {
+  if (!settings.master || !settings.channels.celebration) stopCelebrationMusic();
+});
+
 // Used when the wav cannot be fetched, so the moment still has a sound.
 function synthChime(ctx: AudioContext) {
   const start = ctx.currentTime;
@@ -152,7 +164,7 @@ function synthChime(ctx: AudioContext) {
     oscillator.type = "sine";
     oscillator.frequency.value = frequency;
     gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(0.2, at + 0.008);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.2 * getSoundVolume()), at + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
     oscillator.connect(gain);
     gain.connect(ctx.destination);
