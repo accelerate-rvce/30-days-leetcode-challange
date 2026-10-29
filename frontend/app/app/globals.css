@@ -102,6 +102,9 @@ button { cursor: pointer; }
 .app-shell { min-height: 100vh; overflow: hidden; position: relative; }
 .app-shell::before { background-image: linear-gradient(rgba(34,211,238,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,.045) 1px, transparent 1px); background-size: 50px 50px; content: ""; inset: 0; mask-image: radial-gradient(circle at 50% 28%, black, transparent 82%); opacity: .75; pointer-events: none; position: fixed; z-index: 0; }
 .app-shell > * { position: relative; z-index: 1; }
+/* The header and the sound panel that hangs out of it must stay above the
+   page cards, which the rule above also positions. */
+.app-shell > .topbar { z-index: 20; }
 .google-button { display: inline-flex; margin-top: 30px; min-height: 48px; min-width: 218px; padding: 0 18px; }
 .google-button { width: 218px; }
 .logout-button { background: transparent; border: 1px solid var(--line); color: var(--muted); font-family: var(--font-geist-mono); font-size: 10px; min-height: 34px; padding: 0 10px; }
