@@ -12,7 +12,7 @@ import {
 import { playClickSound } from "../lib/click-sound";
 
 // Bump this when the announcement copy changes and it should be shown again.
-const announcementVersion = "v1";
+const announcementVersion = "v2";
 
 function seenKey(userId: string) {
   return `30days:sound-announcement:${announcementVersion}:${userId || "guest"}`;
@@ -74,10 +74,12 @@ export default function SoundAnnouncement({ userId }: { userId: string }) {
     >
       <div className="sound-announcement-panel">
         <span className="sound-announcement-badge">UPDATE · SOUND</span>
-        <h2 id="sound-announcement-title">You can tune the sound now.</h2>
+        <h2 id="sound-announcement-title">This site has its own volume now.</h2>
         <p>
-          Every effect has its own switch, one master mute, and a volume you control.
-          The speaker button next to Profile keeps your choice saved for this account.
+          Turn the sound effects here up, down, or off — your device&apos;s global volume stays
+          exactly where it is. So you can keep your own music playing and mute or soften the
+          site sounds without touching your speakers. Each effect has its own switch too, and
+          the speaker button next to Profile saves your choice to this account.
         </p>
         <div className="sound-announcement-volume">
           <span>VOLUME <b>{percent}%</b></span>
@@ -105,7 +107,7 @@ export default function SoundAnnouncement({ userId }: { userId: string }) {
             Got it <span>→</span>
           </button>
         </div>
-        <small className="sound-announcement-hint">Reopen these controls any time from the speaker icon in the header.</small>
+        <small className="sound-announcement-hint">These controls only change this site — reopen them any time from the speaker icon in the header.</small>
       </div>
     </div>
   );
