@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import {
   SOUND_CHANNELS,
   getServerSoundSettingsSnapshot,
@@ -20,6 +21,14 @@ const channelCopy: Record<SoundChannel, { label: string; hint: string }> = {
   entrance: { label: "Entrance ident", hint: "The percussion note on arrival" },
   celebration: { label: "Verified celebration", hint: "Thunder hit and mascot music" },
 };
+
+// Kept in sync with the `.sound-panel` width in globals.css. The panel is
+// portaled to <body>, so the coordinates have to be computed here.
+const panelWidth = 276;
+const panelGap = 10;
+const viewportMargin = 12;
+
+type PanelPosition = { top: number; left: number };
 
 function SpeakerIcon({ muted }: { muted: boolean }) {
   return (
@@ -57,6 +66,9 @@ export default function SoundControl() {
     getServerSoundSettingsSnapshot,
   );
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<PanelPosition | null>(null);
   const panelId = useId();
   const percent = Math.round(settings.volume * 100);
   // The capture-phase click handler runs before this state change, so a click
@@ -78,10 +90,51 @@ export default function SoundControl() {
     setSoundVolume(Math.min(1, Math.max(0, next)));
   }
 
+  // The panel is rendered at the end of <body> and pinned with fixed
+  // coordinates taken from the speaker button. That keeps it out of the
+  // header's stacking context (and its backdrop-filter), so page cards can
+  // never paint over it.
+  function measurePanel(): PanelPosition | null {
+    const rect = button.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const maxLeft = window.innerWidth - panelWidth - viewportMargin;
+    const left = Math.max(viewportMargin, Math.min(rect.right - panelWidth, maxLeft));
+    return { top: rect.bottom + panelGap, left };
+  }
+
+  function toggleOpen() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    // Measure before opening so the panel is positioned on its first paint.
+    const next = measurePanel();
+    if (next) setPosition(next);
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const next = measurePanel();
+      if (next) setPosition(next);
+    };
+    window.addEventListener("resize", place);
+    // Capture scroll so the panel follows the button even if an inner element
+    // is the one scrolling.
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (root.current?.contains(target) || panel.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
@@ -94,21 +147,16 @@ export default function SoundControl() {
     };
   }, [open]);
 
-  return (
-    <div className="sound-control" ref={root}>
-      <button
-        type="button"
-        className={`sound-button ${open ? "active" : ""}`}
-        aria-label={settings.master ? "Sound settings" : "Sound settings (muted)"}
-        aria-expanded={open}
-        aria-controls={panelId}
-        title={settings.master ? `Sound effects on · ${percent}%` : "Sound effects off"}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <SpeakerIcon muted={!settings.master || settings.volume === 0} />
-      </button>
-      {open && (
-        <div className="sound-panel" id={panelId} role="group" aria-label="Sound effects">
+  const panelNode = open && position && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          className="sound-panel"
+          id={panelId}
+          ref={panel}
+          role="group"
+          aria-label="Sound effects"
+          style={{ top: position.top, left: position.left }}
+        >
           <div className="sound-panel-head">
             <strong>SOUND EFFECTS</strong>
             <span>{settings.master ? `ON · ${percent}%` : "OFF"}</span>
@@ -153,8 +201,26 @@ export default function SoundControl() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <div className="sound-control" ref={root}>
+      <button
+        type="button"
+        ref={button}
+        className={`sound-button ${open ? "active" : ""}`}
+        aria-label={settings.master ? "Sound settings" : "Sound settings (muted)"}
+        aria-expanded={open}
+        aria-controls={panelId}
+        title={settings.master ? `Sound effects on · ${percent}%` : "Sound effects off"}
+        onClick={toggleOpen}
+      >
+        <SpeakerIcon muted={!settings.master || settings.volume === 0} />
+      </button>
+      {panelNode}
     </div>
   );
 }
