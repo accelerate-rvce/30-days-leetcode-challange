@@ -148,6 +148,7 @@ export function SeasonEndModal({ seasonLabel, endedAt, onViewArchive, onDismiss 
       <h2 id="season-end-title">That’s a wrap.</h2>
       <p>{seasonLabel} of the 30 Days LeetCode Challenge has ended. The leaderboard is final and points are frozen — but every question stays online as a practice archive.</p>
       {endedAt && <p className="season-end-date">Final window closed {formatDate(endedAt)} IST</p>}
+      <p className="season-end-thanks">Thank you for showing up — for the early mornings, the late streaks, and every question you refused to leave unsolved. Thirty days is a habit now, and the archive stays open for as long as you want to keep practising.</p>
       <div className="season-end-actions">
         <button className="primary-button" onClick={onViewArchive}>Browse all 30 questions <span>↓</span></button>
         <button className="secondary-button" onClick={onDismiss}>Close</button>

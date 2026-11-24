@@ -589,6 +589,17 @@ export default function ChallengeApp() {
     } catch { /* private mode: the popup reappears on the next visit */ }
   }, [seasonLabel]);
 
+  // An archived season is a memorial for students, but admins still run the
+  // site: their default landing page becomes the Admin panel while the full
+  // navigation stays available. Only the first arrival is redirected, so
+  // opening the archive or Home afterwards sticks instead of bouncing back.
+  const adminSeasonLanding = useRef(false);
+  useEffect(() => {
+    if (!seasonEnded || !isAdmin || adminSeasonLanding.current || view !== "overview") return;
+    adminSeasonLanding.current = true;
+    navigateTo("admin", "/admin");
+  }, [seasonEnded, isAdmin, view, navigateTo]);
+
   // The popup's primary action shows the question list, not just the page they
   // are already on: on the archived home that list is already below, so it
   // scrolls there instead of pushing an identical URL. "Close" only dismisses,
