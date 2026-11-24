@@ -1,5 +1,5 @@
 import { fetchRecentAcceptedSubmissionsBatch, leetcodeRateLimitRemainingMs, Submission, submissionTimeMs, usersPerRequest } from "./leetcode.js";
-import { ClaimedJob, claimPersistentJobs, enqueueDuePersistentVerifications, markPersistentNotFound, markPersistentRetry, markPersistentVerified, persistenceEnabled } from "./persistence.js";
+import { ClaimedJob, claimPersistentJobs, enqueueDuePersistentVerifications, getSiteSettings, markPersistentNotFound, markPersistentRetry, markPersistentVerified, persistenceEnabled } from "./persistence.js";
 import { Challenge } from "./types.js";
 
 const maxRetries = Number(process.env.LEETCODE_MAX_RETRIES ?? 6);
@@ -58,6 +58,11 @@ export async function runPersistentVerificationCycle(batchSize = defaultBatchSiz
   if (!persistenceEnabled || running) return { claimed: 0, users: 0, skipped: !persistenceEnabled, running };
   running = true;
   try {
+    // Archived seasons keep the question list readable but never award new
+    // points. Leave any outstanding jobs untouched so a later reopen (or a
+    // manual correction) can still resolve them.
+    const settings = await getSiteSettings();
+    if (settings.seasonEnded) return { claimed: 0, users: 0, skipped: true, running: false, seasonEnded: true };
     await enqueueDuePersistentVerifications();
     const jobs = await claimPersistentJobs(batchSize);
     const byUser = new Map<string, ClaimedJob[]>();

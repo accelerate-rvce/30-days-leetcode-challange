@@ -700,7 +700,32 @@ export async function createAdminChallenge(input: { day: number; title: string; 
   return data;
 }
 
-export type SiteSettings = { waitlistEnabled: boolean; message: string; launchAt: string | null; sprintStartedAt: string | null };
+export type SeasonMode = "auto" | "ended" | "live";
+export type SiteSettings = {
+  waitlistEnabled: boolean;
+  message: string;
+  launchAt: string | null;
+  sprintStartedAt: string | null;
+  seasonMode: SeasonMode;
+  seasonLabel: string;
+  seasonEnded: boolean;
+  seasonEndedAt: string | null;
+  // When the season closes, even before it has. Lets the browser switch to the
+  // archive on the exact boundary instead of waiting for the next poll.
+  seasonEndsAt: string | null;
+};
+
+// A season is exactly 30 challenge days, counted from the moment Day 1 went
+// live, so the final window closes at the start of day 31.
+export const SEASON_LENGTH_DAYS = 30;
+
+export type SeasonFeedbackInput = {
+  wantSeasonTwo: "yes" | "maybe" | "no";
+  rating?: number | null;
+  liked?: string;
+  improvements?: string;
+  suggestions?: string;
+};
 
 export type LaunchResult = { started: boolean; reason?: string; challengeId?: string; day?: number; publishedAt?: string; deadlineAt?: string; updatedCompletions?: number; updatedProfiles?: number };
 
@@ -725,7 +750,7 @@ export async function getSiteSettings(): Promise<SiteSettings> {
 }
 
 async function readSiteSettings(): Promise<SiteSettings> {
-  const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null, sprintStartedAt: null };
+  const defaults: SiteSettings = { waitlistEnabled: false, message: "", launchAt: null, sprintStartedAt: null, seasonMode: "auto", seasonLabel: "Season 01", seasonEnded: false, seasonEndedAt: null, seasonEndsAt: null };
   if (!db) return defaults;
   const { data, error } = await db.from("site_settings").select("key,value");
   if (error) throw error;
@@ -733,26 +758,91 @@ async function readSiteSettings(): Promise<SiteSettings> {
   const message = map.get("waitlist_message");
   const launchAt = map.get("launch_at");
   const sprintStartedAt = map.get("sprint_started_at");
+  const rawSeasonMode = map.get("season_mode");
+  const seasonMode: SeasonMode = rawSeasonMode === "ended" || rawSeasonMode === "live" ? rawSeasonMode : "auto";
+  const rawSeasonLabel = map.get("season_label");
+  const seasonLabel = typeof rawSeasonLabel === "string" && rawSeasonLabel.trim() ? rawSeasonLabel.trim() : "Season 01";
+
+  // Archive is automatic once Day 30's window closes, but an admin can pin it
+  // on or off. The effective flag is computed here so every caller (settings,
+  // bootstrap, verification guards) sees the same answer.
+  //
+  // The cutoff is anchored to the season's start date rather than to whatever
+  // the Day 30 row currently says, so deleting or re-dating the last question
+  // can neither extend the season nor close it early. The last deadline is
+  // only a fallback for projects that never recorded a start marker.
+  const seasonStart = typeof sprintStartedAt === "string" ? sprintStartedAt : typeof launchAt === "string" ? launchAt : null;
+  let seasonEndsAt: string | null = seasonStart && Number.isFinite(Date.parse(seasonStart))
+    ? new Date(Date.parse(seasonStart) + SEASON_LENGTH_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    : null;
+  if (seasonMode !== "live") {
+    const { data: latest, error: latestError } = await db.from("challenges").select("day,deadline_at").order("day", { ascending: false }).limit(1).maybeSingle();
+    if (latestError) throw latestError;
+    if (!seasonEndsAt && latest && Number(latest.day) >= SEASON_LENGTH_DAYS) seasonEndsAt = latest.deadline_at as string;
+  }
+  const finalWhistlePassed = seasonEndsAt !== null && Number.isFinite(Date.parse(seasonEndsAt)) && Date.now() >= Date.parse(seasonEndsAt);
+  const seasonEnded = seasonMode === "ended" || finalWhistlePassed;
+  // Only report a closing time that actually happened; a manually archived
+  // season gets no date rather than a scheduled one in the future.
+  const seasonEndedAt = finalWhistlePassed ? seasonEndsAt : null;
+
   return {
     waitlistEnabled: map.get("waitlist_enabled") === true,
     message: typeof message === "string" ? message : "",
     launchAt: typeof launchAt === "string" ? launchAt : null,
     sprintStartedAt: typeof sprintStartedAt === "string" ? sprintStartedAt : null,
+    seasonMode,
+    seasonLabel,
+    seasonEnded,
+    seasonEndedAt,
+    seasonEndsAt,
   };
 }
 
-export async function updateSiteSettings(patch: { waitlistEnabled?: boolean; message?: string; launchAt?: string | null }): Promise<SiteSettings> {
+export async function updateSiteSettings(patch: { waitlistEnabled?: boolean; message?: string; launchAt?: string | null; seasonMode?: SeasonMode; seasonLabel?: string }): Promise<SiteSettings> {
   if (!db) throw new Error("persistence_not_configured");
   const rows: { key: string; value: unknown }[] = [];
   if (patch.waitlistEnabled !== undefined) rows.push({ key: "waitlist_enabled", value: patch.waitlistEnabled });
   if (patch.message !== undefined) rows.push({ key: "waitlist_message", value: patch.message });
   if (patch.launchAt !== undefined) rows.push({ key: "launch_at", value: patch.launchAt });
+  if (patch.seasonMode !== undefined) rows.push({ key: "season_mode", value: patch.seasonMode });
+  if (patch.seasonLabel !== undefined) rows.push({ key: "season_label", value: patch.seasonLabel });
   for (const row of rows) {
     const { error } = await db.from("site_settings").upsert({ key: row.key, value: row.value, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (error) throw error;
   }
   invalidate("settings");
   return getSiteSettings();
+}
+
+export async function createSeasonFeedback(profileId: string, input: SeasonFeedbackInput) {
+  if (!db) throw new Error("persistence_not_configured");
+  const settings = await getSiteSettings();
+  const { data: profile, error: profileError } = await db.from("profiles").select("name,email").eq("id", profileId).maybeSingle();
+  if (profileError) throw profileError;
+  const { data, error } = await db.from("season_feedback").insert({
+    profile_id: profileId,
+    name: profile?.name ?? null,
+    email: profile?.email ?? null,
+    season: settings.seasonLabel,
+    want_season_two: input.wantSeasonTwo,
+    rating: input.rating ?? null,
+    liked: input.liked?.trim() || null,
+    improvements: input.improvements?.trim() || null,
+    suggestions: input.suggestions?.trim() || null,
+  }).select("id,created_at").single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getSeasonFeedback(limit = 200) {
+  if (!db) return [];
+  const { data, error } = await db.from("season_feedback")
+    .select("id,profile_id,name,email,season,want_season_two,rating,liked,improvements,suggestions,created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
 }
 
 export async function launchFirstChallenge(): Promise<LaunchResult> {

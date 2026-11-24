@@ -16,6 +16,7 @@ import { playSiteEntrance } from "../lib/site-sound";
 import { setSoundUser } from "../lib/sound-settings";
 import SoundControl from "./SoundControl";
 import SoundAnnouncement from "./SoundAnnouncement";
+import { SeasonArchive, SeasonEndModal } from "./SeasonArchive";
 import { clearDashboardSnapshot, readDashboardSnapshot, readSettingsCache, writeDashboardSnapshot, writeSettingsCache } from "../lib/dashboard-cache";
 
 const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
@@ -26,7 +27,7 @@ const AdminDashboard = dynamic(() => import("./AdminDashboard"), {
 // Rive touches canvas/wasm at import time, so keep it out of the server render.
 const VerifiedCelebration = dynamic(() => import("./VerifiedCelebration"), { ssr: false });
 
-type View = "overview" | "challenge" | "progress" | "profile" | "leaderboard" | "resources" | "support" | "admin";
+type View = "overview" | "challenge" | "progress" | "profile" | "leaderboard" | "resources" | "support" | "archive" | "admin";
 type OnboardingStage = "welcome" | "briefing" | "signin" | "waitlist" | "ready";
 
 const resources = [
@@ -65,6 +66,7 @@ function viewFor(pathname: string): View {
   if (route === "/leaderboard") return "leaderboard";
   if (route === "/resources") return "resources";
   if (route === "/support") return "support";
+  if (route === "/archive") return "archive";
   if (route === "/admin") return "admin";
   return "overview";
 }
@@ -92,10 +94,25 @@ async function fetchSiteSettings(api: string, signal?: AbortSignal): Promise<Sit
   const response = await fetch(`${api}/api/settings`, { signal, cache: "no-store" });
   if (!response.ok) throw new Error(`settings_${response.status}`);
   const body = await response.json() as Partial<SiteSettings>;
-  if (typeof body.waitlistEnabled !== "boolean" || typeof body.message !== "string" || (body.launchAt !== null && typeof body.launchAt !== "string") || (body.sprintStartedAt !== undefined && body.sprintStartedAt !== null && typeof body.sprintStartedAt !== "string")) {
+  if (typeof body.waitlistEnabled !== "boolean" || typeof body.message !== "string" || (body.launchAt !== null && typeof body.launchAt !== "string") || (body.sprintStartedAt !== undefined && body.sprintStartedAt !== null && typeof body.sprintStartedAt !== "string")
+    || (body.seasonMode !== undefined && body.seasonMode !== "auto" && body.seasonMode !== "ended" && body.seasonMode !== "live")
+    || (body.seasonLabel !== undefined && typeof body.seasonLabel !== "string")
+    || (body.seasonEnded !== undefined && typeof body.seasonEnded !== "boolean")
+    || (body.seasonEndedAt !== undefined && body.seasonEndedAt !== null && typeof body.seasonEndedAt !== "string")
+    || (body.seasonEndsAt !== undefined && body.seasonEndsAt !== null && typeof body.seasonEndsAt !== "string")) {
     throw new Error("invalid_settings");
   }
-  return { waitlistEnabled: body.waitlistEnabled, message: body.message, launchAt: body.launchAt ?? null, sprintStartedAt: body.sprintStartedAt ?? null };
+  return {
+    waitlistEnabled: body.waitlistEnabled,
+    message: body.message,
+    launchAt: body.launchAt ?? null,
+    sprintStartedAt: body.sprintStartedAt ?? null,
+    seasonMode: body.seasonMode ?? "auto",
+    seasonLabel: body.seasonLabel ?? "Season 01",
+    seasonEnded: body.seasonEnded ?? false,
+    seasonEndedAt: body.seasonEndedAt ?? null,
+    seasonEndsAt: body.seasonEndsAt ?? null,
+  };
 }
 
 type DashboardPayload = {
@@ -264,6 +281,15 @@ export default function ChallengeApp() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState("");
   const [settingsRetry, setSettingsRetry] = useState(0);
+  const seasonLabel = siteSettings?.seasonLabel?.trim() || "Season 01";
+  // The server owns the cutoff; this only lets an open tab cross it on time.
+  // "live" is an explicit override, so it disables the client-side switch.
+  const seasonEndsAtMs = siteSettings?.seasonEndsAt && siteSettings.seasonMode !== "live" ? Date.parse(siteSettings.seasonEndsAt) : NaN;
+  const [seasonBoundaryReached, setSeasonBoundaryReached] = useState(false);
+  const seasonEnded = Boolean(siteSettings?.seasonEnded) || seasonBoundaryReached;
+  const seasonEndedAt = siteSettings?.seasonEndedAt ?? (seasonBoundaryReached ? siteSettings?.seasonEndsAt ?? null : null);
+  const [seasonNoticeDismissed, setSeasonNoticeDismissed] = useState(false);
+  const [seasonNoticeReady, setSeasonNoticeReady] = useState(false);
   // The check a student just triggered, if any. The Realtime listener (not a
   // timer) is what resolves it; the marker only survives long enough to stop a
   // stale response from overwriting a newer check.
@@ -398,6 +424,30 @@ export default function ChallengeApp() {
     }
   }, [api, applyDashboard, currentUserId, token]);
 
+  // Day 30 ends and the archive takes over at the exact final whistle, even in
+  // a tab that has been open all day. The timeout only reflects the server's
+  // cutoff; it then revalidates so frozen points and final standings match.
+  useEffect(() => {
+    if (!Number.isFinite(seasonEndsAtMs)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSeasonBoundaryReached(false);
+      return;
+    }
+    const remaining = seasonEndsAtMs - Date.now();
+    if (remaining <= 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSeasonBoundaryReached(true);
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSeasonBoundaryReached(false);
+    const timer = window.setTimeout(() => {
+      setSeasonBoundaryReached(true);
+      void loadDashboard("background");
+    }, remaining + 1_000);
+    return () => window.clearTimeout(timer);
+  }, [loadDashboard, seasonEndsAtMs]);
+
   useEffect(() => {
     if (introSeen) return;
     const timer = window.setTimeout(() => { rememberIntro(); setIntroDone(true); }, 2400);
@@ -513,6 +563,45 @@ export default function ChallengeApp() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [api, settingsRetry]);
+
+  // The season-end announcement is shown once per browser tab per season, so a
+  // reload does not nag but a fresh visit still sees the news.
+  useEffect(() => {
+    if (!seasonEnded) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSeasonNoticeReady(false);
+      return;
+    }
+    let dismissed = false;
+    try {
+      dismissed = window.sessionStorage.getItem(`30days:season-ended:${seasonLabel}`) === "1";
+    } catch { /* private mode: show it again, which is harmless */ }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSeasonNoticeDismissed(dismissed);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSeasonNoticeReady(true);
+  }, [seasonEnded, seasonLabel]);
+
+  const dismissSeasonNotice = useCallback(() => {
+    setSeasonNoticeDismissed(true);
+    try {
+      window.sessionStorage.setItem(`30days:season-ended:${seasonLabel}`, "1");
+    } catch { /* private mode: the popup reappears on the next visit */ }
+  }, [seasonLabel]);
+
+  // The popup's primary action shows the question list, not just the page they
+  // are already on: on the archived home that list is already below, so it
+  // scrolls there instead of pushing an identical URL. "Close" only dismisses,
+  // so the two buttons never do the same thing.
+  const openSeasonQuestions = () => {
+    dismissSeasonNotice();
+    if (view !== "archive" && !(view === "overview" && seasonEnded)) navigateTo("archive", "/archive");
+    // The archive has to paint before the anchor exists. A timeout rather than
+    // requestAnimationFrame, which never fires in a background or headless tab.
+    window.setTimeout(() => {
+      document.getElementById("season-questions")?.scrollIntoView({ block: "start" });
+    }, 50);
+  };
 
   // Initial paint: a cached snapshot renders instantly, then a single
   // /bootstrap request revalidates it. Without a snapshot the same call is the
@@ -687,6 +776,15 @@ export default function ChallengeApp() {
     // The clip starts inside the click gesture so the browser allows audio.
     // Recording runs alongside it, and LeetCode opens once the whoosh lands.
     const whoosh = playWhoosh();
+    // Archived seasons are practice-only: open LeetCode without recording an
+    // attempt or queueing a verification that could award points.
+    if (seasonEnded) {
+      setOpening(true);
+      await whoosh;
+      if (navigationEpoch.current === epoch) openLeetcode(leetcodeUrl);
+      setOpening(false);
+      return;
+    }
     if (attemptRecorded) {
       setOpening(true);
       await whoosh;
@@ -866,19 +964,41 @@ export default function ChallengeApp() {
   if (!isAdmin && (onboardingStage === "waitlist" || !editingRegistration)) return <WaitlistDetails name={waitlistName} setName={setWaitlistName} handle={leetcodeHandle} setHandle={setLeetcodeHandle} academicYear={academicYear} setAcademicYear={setAcademicYear} saving={savingProfile} onSave={saveProfile} onCancel={editingRegistration ? () => { setError(""); setOnboardingStage("ready"); } : undefined} error={error} notice={launchGated ? (editingRegistration ? (siteSettings?.message || "You’re registered. The dashboard unlocks at launch.") : "Connect your LeetCode handle to complete your waitlist registration.") : ""} />;
   if (launchGated) return <ComingSoon name={progress.profile.name} handle={progress.profile.leetcode_username ?? ""} academicYear={progress.profile.academic_year ?? "Second Year"} email={session.user.email ?? ""} message={siteSettings?.message ?? ""} launchAt={siteSettings?.launchAt ?? null} onEdit={() => { setError(""); setOnboardingStage("waitlist"); }} onSignOut={signOut} />;
 
-  const nav: { id: View; label: string; path: string }[] = [{ id: "overview", label: "Home", path: "/" }, { id: "challenge", label: "Challenge", path: "/challenge" }, { id: "progress", label: "My progress", path: "/progress" }, { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" }, { id: "resources", label: "Resources", path: "/resources" }, { id: "support", label: "Support", path: "/support" }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : [])];
-  const title = view === "leaderboard" ? "THE LEADERBOARD" : view === "progress" ? "YOUR PROGRESS" : view === "profile" ? "YOUR PROFILE" : view === "challenge" ? (viewingPastDay && selectedChallenge ? `DAY ${String(selectedChallenge.day).padStart(2, "0")} · PAST CHALLENGE` : "TODAY’S QUESTION") : view === "resources" ? "STUDY RESOURCES" : view === "support" ? "SUPPORT" : view === "admin" ? "ADMIN MONITORING" : "COMMAND CENTER";
+  const nav: { id: View; label: string; path: string }[] = [
+    { id: "overview", label: "Home", path: "/" },
+    seasonEnded
+      ? { id: "archive", label: "Archive", path: "/archive" }
+      : { id: "challenge", label: "Challenge", path: "/challenge" },
+    // Admins keep the day-by-day challenge view after the archive opens, so
+    // they can still open any question and inspect the old detail layout.
+    ...(seasonEnded && isAdmin ? [{ id: "challenge" as View, label: "Challenge", path: "/challenge" }] : []),
+    { id: "progress", label: "My progress", path: "/progress" },
+    { id: "leaderboard", label: "Leaderboard", path: "/leaderboard" },
+    { id: "resources", label: "Resources", path: "/resources" },
+    { id: "support", label: "Support", path: "/support" },
+    ...(isAdmin ? [{ id: "admin" as View, label: "Admin", path: "/admin" }] : []),
+  ];
+  const title = view === "leaderboard" ? (seasonEnded ? "FINAL STANDINGS" : "THE LEADERBOARD")
+    : view === "progress" ? "YOUR PROGRESS"
+    : view === "profile" ? "YOUR PROFILE"
+    : view === "challenge" ? (seasonEnded ? "ARCHIVED QUESTION" : viewingPastDay && selectedChallenge ? `DAY ${String(selectedChallenge.day).padStart(2, "0")} · PAST CHALLENGE` : "TODAY’S QUESTION")
+    : view === "resources" ? "STUDY RESOURCES"
+    : view === "support" ? "SUPPORT"
+    : view === "archive" ? `${seasonLabel.toUpperCase()} · ARCHIVE`
+    : view === "admin" ? "ADMIN MONITORING"
+    : seasonEnded ? `${seasonLabel.toUpperCase()} · ARCHIVE` : "COMMAND CENTER";
 
-  return <div className="app-shell"><SoundAnnouncement userId={currentUserId ?? ""} /><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> LIVE</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateTo(item.id, item.path)}>{item.label}</button>)}</nav><div className="top-actions"><button type="button" className="user-avatar" onClick={() => navigateTo("profile", "/profile")} aria-label="Open your profile" title="Your profile">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</button><button type="button" className={`profile-button ${view === "profile" ? "active" : ""}`} onClick={() => navigateTo("profile", "/profile")} aria-current={view === "profile" ? "page" : undefined}>Profile</button><SoundControl /><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> PLACEMENT READINESS INDEX <span className="muted">· SEASON 01</span></div><h1>{title}</h1><p>{view === "leaderboard" ? "Consistency wins. Every solved question counts." : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? (viewingPastDay ? "This day has closed. A late solve still earns points on your record." : "Today’s problem is ready when you are.") : view === "progress" ? "A clear record of the work you have actually verified." : view === "profile" ? "Your name, streak, and the LeetCode profile we verify." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithm sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
-    {view === "overview" && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); navigateTo("challenge", "/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} currentChallenge={challenge} onSelect={(id) => { const item = challenges.find((candidate) => candidate.id === id); setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((entry) => entry.challenge_id === id) ?? false); setVerifyMessage(""); navigateTo("challenge", item ? `/challenge?day=${item.day}` : "/challenge", item?.day ?? null); }} /></>}
-    {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} attemptRecorded={attemptRecorded} recording={recording} opening={opening} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={selectedStatus?.status ?? null} verificationJob={selectedStatus?.verification ?? null} awardedPoints={selectedStatus?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
+  return <div className="app-shell"><SoundAnnouncement userId={currentUserId ?? ""} /><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><AccelerateMark /></span><div><strong>30DAYS</strong><small>BY ACCELERATE · RVCE</small></div></div><div className="live-pill"><span className="pulse" /> {challenge ? `DAY ${String(challenge.day).padStart(2, "0")}` : "SPRINT"} <span className="divider" /> {seasonEnded ? "ARCHIVED" : "LIVE"}</div><nav className="nav-tabs" aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateTo(item.id, item.path)}>{item.label}</button>)}</nav><div className="top-actions"><button type="button" className="user-avatar" onClick={() => navigateTo("profile", "/profile")} aria-label="Open your profile" title="Your profile">{(progress?.profile.name ?? session.user.email ?? "U").slice(0, 2).toUpperCase()}</button><button type="button" className={`profile-button ${view === "profile" ? "active" : ""}`} onClick={() => navigateTo("profile", "/profile")} aria-current={view === "profile" ? "page" : undefined}>Profile</button><SoundControl /><button className="logout-button" onClick={signOut}>Log out</button></div></header><main className="page-wrap"><section className="hero-row"><div><div className="eyebrow"><span className="accent-dot" /> {seasonEnded ? "SEASON ARCHIVE" : "PLACEMENT READINESS INDEX"} <span className="muted">· {seasonLabel.toUpperCase()}</span></div><h1>{title}</h1><p>{view === "leaderboard" ? (seasonEnded ? "Final standings. Every verified solve is locked in." : "Consistency wins. Every solved question counts.") : view === "support" ? "Get help with your challenge account or verification status." : view === "challenge" ? (seasonEnded ? "This season is archived. Questions stay open for practice and no longer award points." : viewingPastDay ? "This day has closed. A late solve still earns points on your record." : "Today’s problem is ready when you are.") : view === "progress" ? "A clear record of the work you have actually verified." : view === "profile" ? "Your name, streak, and the LeetCode profile we verify." : view === "resources" ? "A curated library for planning practice and filling the gaps." : view === "archive" || seasonEnded ? "The season is over. Browse every question and help shape what comes next." : view === "admin" ? "Live worker health and verification totals." : "A sharp view of your 30-day algorithmic sprint."}</p></div></section>{error && <div className="error-banner" role="alert">{error}</div>}
+    {(view === "archive" || (view === "overview" && seasonEnded)) && <SeasonArchive api={api} token={token ?? ""} challenges={challenges} progress={progress} seasonLabel={seasonLabel} seasonEndedAt={seasonEndedAt} email={session.user.email ?? ""} onOpenLeaderboard={() => navigateTo("leaderboard", "/leaderboard")} />}
+    {view === "overview" && !seasonEnded && <><section className="metrics-grid"><Metric label="CAMPAIGN CADENCE" value={challenge ? `DAY ${String(challenge.day).padStart(2, "0")} / 30` : "—"} detail={challenge ? `${Math.max(0, 30 - challenge.day)} days remaining in this cohort` : "No active cohort"} progress={challenge ? challenge.day / 30 * 100 : undefined} /><Metric label="ACTIVE CHALLENGERS" value={String(leaderboard.length)} detail="Live registered profiles" /><Metric label="YOUR SCORE" value={`${progress?.profile.points ?? 0} PTS`} detail="Awarded after verification" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" progress={Math.min(100, ((progress?.profile.streak ?? 0) / 30) * 100)} accent /></section><section className="overview-grid"><ChallengeCard challenge={challenge} onOpen={() => { setSelectedChallengeId(challenge?.id ?? ""); setVerifyMessage(""); navigateTo("challenge", "/challenge"); }} /><StreakTracker challenges={challenges} progress={progress} currentChallenge={challenge} /></section><ChallengeHistory challenges={challenges} currentChallenge={challenge} onSelect={(id) => { const item = challenges.find((candidate) => candidate.id === id); setSelectedChallengeId(id); setAttemptRecorded(progress?.statuses.some((entry) => entry.challenge_id === id) ?? false); setVerifyMessage(""); navigateTo("challenge", item ? `/challenge?day=${item.day}` : "/challenge", item?.day ?? null); }} /></>}
+    {view === "challenge" && <ChallengeDetail challenge={selectedChallenge} seasonEnded={seasonEnded} attemptRecorded={attemptRecorded} recording={recording} opening={opening} verifying={verifying} verifyMessage={verifyMessage} verificationStatus={selectedStatus?.status ?? null} verificationJob={selectedStatus?.verification ?? null} awardedPoints={selectedStatus?.awarded_points} onSolve={recordAndSolve} onVerify={checkSubmission} />}
     {view === "progress" && <ProgressView progress={progress} verifiedCount={verified.length} challenges={challenges} />}
     {view === "profile" && <ProfileView progress={progress} email={session.user.email ?? ""} name={waitlistName} handle={leetcodeHandle} academicYear={academicYear} saving={profileSaving} error={profileError} notice={profileNotice} onName={setWaitlistName} onHandle={setLeetcodeHandle} onYear={setAcademicYear} onSave={updateProfile} />}
-    {view === "leaderboard" && <Leaderboard rows={leaderboard} query={leaderboardQuery} setQuery={setLeaderboardQuery} me={progress.profile.leetcode_username ?? ""} myName={progress.profile.name} myId={progress.profile.id ?? ""} />}
+    {view === "leaderboard" && <Leaderboard rows={leaderboard} archived={seasonEnded} query={leaderboardQuery} setQuery={setLeaderboardQuery} me={progress.profile.leetcode_username ?? ""} myName={progress.profile.name} myId={progress.profile.id ?? ""} />}
     {view === "resources" && <Resources query={resourceQuery} setQuery={setResourceQuery} filtered={filteredResources} />}
     {view === "support" && <Support />}
     {view === "admin" && isAdmin && <AdminDashboard api={api} token={token ?? ""} metrics={adminMetrics} challenges={adminChallenges} users={adminUsers} jobs={adminJobs} logs={adminLogs} completions={adminCompletions} onReturn={() => navigateTo("overview", "/")} onRefresh={(overview) => { setAdminMetrics(overview.metrics); setAdminChallenges(overview.challenges); setAdminUsers(overview.users); setAdminJobs(overview.jobs); setAdminCompletions(overview.completions); setAdminLogs(overview.logs); }} onSettingsSaved={(next) => { setSiteSettings(next); setSettingsError(""); }} />}
-  </main><footer><span>ACCELERATE // THE COMPUTER SCIENCE CLUB OF RVCE · MYSURU ROAD, BENGALURU 560059</span><a className="footer-status" href={statusPageUrl} target="_blank" rel="noreferrer">SYSTEM STATUS ↗</a><span>INNOVATE · CONNECT · INSPIRE</span></footer>{celebration && <VerifiedCelebration points={celebration.points} day={challenges.find((item) => item.id === celebration.challengeId)?.day} onDismiss={dismissCelebration} />}</div>;
+  </main><footer><span>ACCELERATE // THE COMPUTER SCIENCE CLUB OF RVCE · MYSURU ROAD, BENGALURU 560059</span><a className="footer-status" href={statusPageUrl} target="_blank" rel="noreferrer">SYSTEM STATUS ↗</a><span>INNOVATE · CONNECT · INSPIRE</span></footer>{seasonEnded && seasonNoticeReady && !seasonNoticeDismissed && <SeasonEndModal seasonLabel={seasonLabel} endedAt={seasonEndedAt} onViewArchive={openSeasonQuestions} onDismiss={dismissSeasonNotice} />}{celebration && <VerifiedCelebration points={celebration.points} day={challenges.find((item) => item.id === celebration.challengeId)?.day} onDismiss={dismissCelebration} />}</div>;
 }
 
 function ProfileView({ progress, email, name, handle, academicYear, saving, error, notice, onName, onHandle, onYear, onSave }: {
@@ -947,8 +1067,9 @@ function ProfileView({ progress, email, name, handle, academicYear, saving, erro
 function ChallengeCard({ challenge, onOpen }: { challenge: Challenge | null; onOpen: () => void }) { return <article className="panel challenge-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY’S QUESTION {challenge && <span className="muted">· DAY {String(challenge.day).padStart(2, "0")}</span>}</div><h2>{challenge?.title ?? "No challenge published"}</h2></div>{challenge && <span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()}</span>}</div>{challenge ? <><div className="problem-meta"><span><b>{challenge.slug.toUpperCase()}</b> PROBLEM ID</span><span><b>{challenge.points} PTS</b> AVAILABLE</span><span><b>{formatTime(challenge.deadlineAt)} IST</b> DEADLINE</span></div><p className="challenge-privacy-note"><strong>Curate your profile:</strong> turn on <b>Recent AC Problems and Submission Details</b> and <b>Submission Heatmap</b> in <a href="https://leetcode.com/settings/profile/" target="_blank" rel="noreferrer">LeetCode privacy settings</a> so we can verify your solve.</p><button className="primary-button" onClick={onOpen}>Open question <span>→</span></button></> : <p className="empty-copy">The next challenge will appear here when it is published.</p>}</article>; }
 function ChallengeHistory({ challenges, currentChallenge, onSelect }: { challenges: Challenge[]; currentChallenge: Challenge | null; onSelect: (id: string) => void }) { const currentDay = currentChallenge?.day ?? 31; const past = challenges.filter((item) => item.id !== currentChallenge?.id && item.day < currentDay); return <article className="panel activity-panel"><div className="eyebrow">CHALLENGE HISTORY</div><h2>Complete a missed challenge</h2>{past.length === 0 ? <p className="empty-copy">No earlier challenges are available.</p> : <div className="activity-list">{past.map((item) => <div className="activity-row" key={item.id}><span className="question-day">DAY {String(item.day).padStart(2, "0")}</span><div><strong>{item.title}</strong><p>Late completion · 70 points</p></div><button className="text-button" onClick={() => onSelect(item.id)}>Open →</button></div>)}</div>}</article>; }
 function StreakTracker({ challenges, progress, currentChallenge }: { challenges: Challenge[]; progress: Progress | null; currentChallenge: Challenge | null }) { const completedDays = new Set((progress?.statuses ?? []).filter((item) => item.status === "verified").map((item) => challenges.find((challenge) => challenge.id === item.challenge_id)?.day).filter((day): day is number => typeof day === "number")); return <article className="panel tracker-panel"><div className="panel-heading"><div><div className="eyebrow">STREAK TRACKER</div><h2>30 days in motion</h2></div><span className="tracker-count">{progress?.profile.streak ?? 0} <small>/ 30</small></span></div><div className="day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; return <span key={day} className={completedDays.has(day) ? "complete" : currentChallenge?.day === day ? "today" : ""}>{String(day).padStart(2, "0")}</span>; })}</div><div className="tracker-foot"><span><span className="legend complete" /> verified</span><span><span className="legend today" /> current</span><span>next challenge at 00:00 IST</span></div></article>; }
-function ChallengeDetail({ challenge, attemptRecorded, recording, opening, verifying, verifyMessage, verificationStatus, verificationJob, awardedPoints, onSolve, onVerify }: {
+function ChallengeDetail({ challenge, seasonEnded, attemptRecorded, recording, opening, verifying, verifyMessage, verificationStatus, verificationJob, awardedPoints, onSolve, onVerify }: {
   challenge: Challenge | null;
+  seasonEnded: boolean;
   attemptRecorded: boolean;
   recording: boolean;
   opening: boolean;
@@ -962,6 +1083,7 @@ function ChallengeDetail({ challenge, attemptRecorded, recording, opening, verif
 }) {
   const now = useNow();
   if (!challenge) return <EmptyPanel title="No challenge published" copy="There is no active challenge in the live database." />;
+  if (seasonEnded) return <section className="challenge-detail-layout"><article className="panel challenge-detail"><div className="eyebrow"><span className="accent-dot" /> DAY {String(challenge.day).padStart(2, "0")} · ARCHIVED QUESTION</div><div className="detail-title-row"><div><h2>{challenge.title}</h2><p className="slug">leetcode.com/problems/{challenge.slug}</p></div><span className={`difficulty ${challenge.difficulty.toLowerCase()}`}>{challenge.difficulty.toUpperCase()} · PRACTICE</span></div><div className="detail-actions"><button className="primary-button" onClick={onSolve} disabled={opening}>{opening ? "Opening LeetCode…" : "Solve on LeetCode"} <span>↗</span></button><span className="verification">○ ARCHIVED · NO POINTS</span></div><p className="empty-copy">This season has ended. The question stays open for practice, but solves no longer award points, queue verification, or change the final standings.</p></article><aside className="panel deadline-card"><div className="eyebrow">SEASON STATUS</div><div className="countdown" aria-label="Season archived">CLOSED</div><p>Final window ended {formatDate(challenge.deadlineAt)}</p><div className="status-list"><div><span className="muted-dot" /> Attempts <b>practice only</b></div><div><span className="muted-dot" /> Points <b>frozen</b></div><div><span className="muted-dot" /> Leaderboard <b>final</b></div></div></aside></section>;
   const isVerified = verificationStatus === "verified";
   const availablePoints = isVerified ? (awardedPoints ?? challenge.points) : now <= Date.parse(challenge.deadlineAt) ? challenge.points : 70;
   const jobStatus = verificationJob?.status ?? null;
@@ -1007,7 +1129,7 @@ function pendingVerificationMessage(entry?: Progress["statuses"][number]) {
 function formatCountdown(deadline: string, now: number) { const remaining = Math.max(0, Date.parse(deadline) - now); const hours = Math.floor(remaining / 3_600_000); const minutes = Math.floor((remaining % 3_600_000) / 60_000); const seconds = Math.floor((remaining % 60_000) / 1_000); return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`; }
 function ProgressView({ progress, verifiedCount, challenges }: { progress: Progress | null; verifiedCount: number; challenges: Challenge[] }) { const verifiedItems = (progress?.statuses ?? []).filter((item) => item.status === "verified"); const recent = verifiedItems.slice(0, 3); const difficultyCounts = challenges.filter((challenge) => verifiedItems.some((item) => item.challenge_id === challenge.id)).reduce((counts, challenge) => { counts[challenge.difficulty] += 1; return counts; }, { Easy: 0, Medium: 0, Hard: 0 } as Record<string, number>); return <section className="progress-layout"><div className="progress-main"><article className="panel progress-hero"><div><div className="eyebrow">YOUR VERIFIED RECORD</div><h2>{verifiedCount} of 30 days complete</h2><p>Keep showing up. Your streak is based on verified solutions, not clicks.</p></div><div className="big-progress">{progress?.completionPercentage ?? 0}<span>%</span></div></article><section className="metrics-grid progress-metrics"><Metric label="VERIFIED COMPLETIONS" value={String(verifiedCount).padStart(2, "0")} detail="No duplicate points awarded" accent /><Metric label="CURRENT STREAK" value={`${progress?.profile.streak ?? 0} DAYS`} detail="Verified solves only" accent /><Metric label="TOTAL POINTS" value={String(progress?.profile.points ?? 0)} detail="Database-backed score" /><Metric label="DIFFICULTY MIX" value={`${difficultyCounts.Easy} · ${difficultyCounts.Medium} · ${difficultyCounts.Hard}`} detail="Easy · medium · hard" /></section><article className="panel activity-panel"><div className="panel-heading"><div><div className="eyebrow">CHALLENGE CALENDAR</div><h2>Consistency at a glance</h2></div><span className="mini-tag">ASIA / KOLKATA</span></div><div className="day-grid large-day-grid">{Array.from({ length: 30 }, (_, index) => { const day = index + 1; const challenge = challenges.find((item) => item.day === day); const complete = challenge ? verifiedItems.some((item) => item.challenge_id === challenge.id) : false; return <span key={day} className={complete ? "complete" : ""}>{String(day).padStart(2, "0")}</span>; })}</div></article></div><aside className="progress-side"><article className="panel"><div className="eyebrow">RECENT ACTIVITY</div>{recent.length ? recent.map((item) => { const challenge = challenges.find((candidate) => candidate.id === item.challenge_id); return <div className="history-row" key={item.challenge_id}><span className="history-day">{String(challenge?.day ?? "—").padStart(2, "0")}</span><div><strong>{challenge?.title ?? "Verified challenge"}</strong><small>Verified · +{item.awarded_points ?? 0} pts</small></div><span className="verified">✓</span></div>; }) : <p className="empty-copy">No verified activity yet.</p>}</article><article className="panel"><div className="eyebrow">RULES THAT COUNT</div><p className="rule-copy">A streak day is earned only when the backend verifies an accepted submission inside that challenge&apos;s eligibility window.</p></article></aside></section>; }
 const LEADERBOARD_PAGE_SIZE = 10;
-function Leaderboard({ rows, query, setQuery, me, myName, myId }: { rows: LeaderboardRow[]; query: string; setQuery: (value: string) => void; me: string; myName: string; myId: string }) {
+function Leaderboard({ rows, archived, query, setQuery, me, myName, myId }: { rows: LeaderboardRow[]; archived: boolean; query: string; setQuery: (value: string) => void; me: string; myName: string; myId: string }) {
   const [page, setPage] = useState(1);
   const normalizedQuery = query.toLowerCase().trim();
   const filteredRows = rows.filter((row) => `${row.name} ${row.handle} ${row.academicYear}`.toLowerCase().includes(normalizedQuery));
@@ -1028,7 +1150,7 @@ function Leaderboard({ rows, query, setQuery, me, myName, myId }: { rows: Leader
   const myInitials = (myRow?.name || myName || "?").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const isMe = (row: LeaderboardRow) => row === myRow;
 
-  return <><section className="leaderboard-metrics"><Metric label="VERIFIED SOLUTIONS" value={String(verifiedSolutions)} detail="Across live participants" accent /><Metric label="AVG. COHORT SCORE" value={`${rows.length ? Math.round(totalPoints / rows.length) : 0} PTS`} detail={`Across ${rows.length} challengers`} /><Metric label="SYNC POLLER" value="ACTIVE" detail="Backend verification worker" accent /></section><section className="panel my-rank" aria-label="Your rank"><div className="my-rank-score"><span className="eyebrow">YOUR RANK</span><strong>{myRow ? `#${String(myRow.rank).padStart(2, "0")}` : "—"}</strong><small>{myRow ? `of ${rows.length} challengers` : "Not on the board yet"}</small></div>{myRow ? <><div className="table-person my-rank-person"><div className="avatar small">{myInitials}</div><div><strong>{myRow.name}</strong><small>{myRow.handle || "No LeetCode handle"}</small></div></div><div className="my-rank-stats"><span><b>{myRow.solved}</b><small>SOLVED</small></span><span><b>{myRow.streak}D</b><small>STREAK</small></span><span><b>{myRow.points}</b><small>PTS</small></span></div></> : <p className="my-rank-empty">Verify your first accepted submission and your rank appears here.</p>}</section>{podiumRows.length >= 3 && <section className="podium-grid"><PodiumCard row={podiumRows[1]} place="second" /><PodiumCard row={podiumRows[0]} place="first" /><PodiumCard row={podiumRows[2]} place="third" /></section>}<section className="panel ranking-panel"><div className="panel-heading"><div><div className="eyebrow">CURRENT SPLIT · {rows.length} STUDENTS</div><h2>All challengers</h2><p className="ranking-rule">POINTS → STREAK → SUBMISSION TIME</p></div><label className="search-box"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => { setPage(1); setQuery(event.target.value); }} placeholder="Search by name or handle" aria-label="Search by name or handle" /></label></div>{filteredRows.length === 0 ? <p className="empty-copy">{rows.length ? "No challengers match your search." : "No verified participants yet."}</p> : <><div className="table-wrap"><table><thead><tr><th>RANK</th><th>CHALLENGER</th><th>BRANCH</th><th>SOLVED</th><th>STREAK</th><th>SCORE</th><th>TREND</th></tr></thead><tbody>{pageRows.map((row) => <tr key={`${row.rank}-${row.handle || row.name}`} className={[row.rank <= 3 ? "top-row" : "", isMe(row) ? "my-row" : ""].filter(Boolean).join(" ")}><td className="rank-cell">{String(row.rank).padStart(2, "0")}{isMe(row) && <span className="you-tag">YOU</span>}</td><td><div className="table-person"><div className="avatar small">{row.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{row.name}</strong><small>{row.handle || "—"}</small></div></div></td><td>{row.academicYear}</td><td>{row.solved} / 30</td><td>{row.streak} days</td><td className="score-cell">{row.points} pts</td><td className="muted">—</td></tr>)}</tbody></table></div><div className="pagination"><span>Showing {(currentPage - 1) * LEADERBOARD_PAGE_SIZE + 1}–{Math.min(currentPage * LEADERBOARD_PAGE_SIZE, filteredRows.length)} of {filteredRows.length} challengers</span><div className="pagination-controls"><button className="secondary-button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1} aria-label="Previous page">← Previous</button><span aria-live="polite">Page {currentPage} of {totalPages}</span><button className="secondary-button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === totalPages} aria-label="Next page">Next →</button></div></div></>}</section></>; }
+  return <><section className="leaderboard-metrics"><Metric label="VERIFIED SOLUTIONS" value={String(verifiedSolutions)} detail={archived ? "Final count, Season 01" : "Across live participants"} accent /><Metric label="AVG. COHORT SCORE" value={`${rows.length ? Math.round(totalPoints / rows.length) : 0} PTS`} detail={archived ? `Final field of ${rows.length} challengers` : `Across ${rows.length} challengers`} />{archived ? <Metric label="POINTS" value="FROZEN" detail="No solves count after the archive" accent /> : <Metric label="SYNC POLLER" value="ACTIVE" detail="Backend verification worker" accent />}</section><section className="panel my-rank" aria-label="Your rank"><div className="my-rank-score"><span className="eyebrow">YOUR RANK</span><strong>{myRow ? `#${String(myRow.rank).padStart(2, "0")}` : "—"}</strong><small>{myRow ? `of ${rows.length} challengers` : "Not on the board yet"}</small></div>{myRow ? <><div className="table-person my-rank-person"><div className="avatar small">{myInitials}</div><div><strong>{myRow.name}</strong><small>{myRow.handle || "No LeetCode handle"}</small></div></div><div className="my-rank-stats"><span><b>{myRow.solved}</b><small>SOLVED</small></span><span><b>{myRow.streak}D</b><small>STREAK</small></span><span><b>{myRow.points}</b><small>PTS</small></span></div></> : <p className="my-rank-empty">Verify your first accepted submission and your rank appears here.</p>}</section>{podiumRows.length >= 3 && <section className="podium-grid"><PodiumCard row={podiumRows[1]} place="second" /><PodiumCard row={podiumRows[0]} place="first" /><PodiumCard row={podiumRows[2]} place="third" /></section>}<section className="panel ranking-panel"><div className="panel-heading"><div><div className="eyebrow">{archived ? "FINAL TABLE" : "CURRENT SPLIT"} · {rows.length} STUDENTS</div><h2>All challengers</h2><p className="ranking-rule">POINTS → STREAK → SUBMISSION TIME</p></div><label className="search-box"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => { setPage(1); setQuery(event.target.value); }} placeholder="Search by name or handle" aria-label="Search by name or handle" /></label></div>{filteredRows.length === 0 ? <p className="empty-copy">{rows.length ? "No challengers match your search." : "No verified participants yet."}</p> : <><div className="table-wrap"><table><thead><tr><th>RANK</th><th>CHALLENGER</th><th>BRANCH</th><th>SOLVED</th><th>STREAK</th><th>SCORE</th><th>TREND</th></tr></thead><tbody>{pageRows.map((row) => <tr key={`${row.rank}-${row.handle || row.name}`} className={[row.rank <= 3 ? "top-row" : "", isMe(row) ? "my-row" : ""].filter(Boolean).join(" ")}><td className="rank-cell">{String(row.rank).padStart(2, "0")}{isMe(row) && <span className="you-tag">YOU</span>}</td><td><div className="table-person"><div className="avatar small">{row.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{row.name}</strong><small>{row.handle || "—"}</small></div></div></td><td>{row.academicYear}</td><td>{row.solved} / 30</td><td>{row.streak} days</td><td className="score-cell">{row.points} pts</td><td className="muted">—</td></tr>)}</tbody></table></div><div className="pagination"><span>Showing {(currentPage - 1) * LEADERBOARD_PAGE_SIZE + 1}–{Math.min(currentPage * LEADERBOARD_PAGE_SIZE, filteredRows.length)} of {filteredRows.length} challengers</span><div className="pagination-controls"><button className="secondary-button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1} aria-label="Previous page">← Previous</button><span aria-live="polite">Page {currentPage} of {totalPages}</span><button className="secondary-button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === totalPages} aria-label="Next page">Next →</button></div></div></>}</section></>; }
 function PodiumCard({ row, place }: { row: LeaderboardRow; place: "first" | "second" | "third" }) { const initials = row.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase(); const tier = row.rank === 1 ? "GOLD" : row.rank === 2 ? "SILVER" : "BRONZE"; return <article className={`podium podium-${place}`}><div className="podium-topline" /><div className="podium-rank">0{row.rank}</div><div className="podium-tier">{tier} TIER</div><div className="podium-person"><div className="avatar">{initials}</div><div><h3>{row.name}</h3><p>{row.academicYear} · {row.handle}</p></div></div><div className="podium-stats"><span><b>{row.solved}</b> SOLVED</span><span><b>{row.streak}D</b> STREAK</span><span><b>{row.points}</b> SCORE</span></div></article>; }
 function Resources({ query, setQuery, filtered }: { query: string; setQuery: (value: string) => void; filtered: ReadonlyArray<typeof resources[number]> }) { return <section className="resources-page"><div className="resource-controls"><div><span className="resource-count">{filtered.length} resources</span><p>Each link opens in a new tab. Save the paths that fit your current weak spot.</p></div><label className="search-box resource-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search topics or source" aria-label="Search resources" /></label></div>{["DSA Roadmaps & Problem Sheets", "YouTube Learning Resources"].map((category) => { const items = filtered.filter((resource) => resource.category === category); return <section className="resource-section" key={category}><div className="resource-section-heading"><h2>{category}</h2><span>{items.length} listed</span></div>{items.length ? <div className="resource-grid">{items.map((resource) => <article className="resource-card" key={resource.title}><div className="resource-card-top"><span className={`resource-kind ${resource.href ? "" : "pending"}`}>{resource.kind}</span><span aria-hidden="true">{resource.href ? "↗" : "· · ·"}</span></div><h3>{resource.title}</h3><p>{resource.detail}</p>{resource.href ? <a href={resource.href} target="_blank" rel="noreferrer" className="resource-link">Open resource <span>↗</span></a> : <span className="resource-unavailable">Link pending verification</span>}</article>)}</div> : <div className="resource-empty"><strong>No resources match “{query}”.</strong><button className="text-button" onClick={() => setQuery("")}>Clear search</button></div>}</section>; })}</section>; }
 type UptimeMonitor = {

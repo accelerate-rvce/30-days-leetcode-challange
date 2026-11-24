@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
-import { adminIdFromAccessToken, createAdminChallenge, deleteAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getNextChallengePublishAt, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
+import { adminIdFromAccessToken, createAdminChallenge, createSeasonFeedback, deleteAdminChallenge, getAdminAnalytics, getAdminAuditLogs, getAdminChallenges, getAdminCompletions, getAdminUsers, getAdminVerificationJobs, getLeetCodeUsernameOwner, getNextChallengePublishAt, getPersistentAdminMetrics, getPersistentChallenge, getPersistentChallenges, getPersistentCurrentChallenge, getPersistentJobMetrics, getPersistentLeaderboard, getPersistentProgress, getPersistentProfile, getSeasonFeedback, enqueuePersistentVerification, getSiteSettings, launchFirstChallenge, manuallyVerifyPersistentCompletion, persistenceEnabled, preparePersistentVerification, recordPersistentAttempt, reorderAdminChallenges, resetCohort, updateAdminChallenge, updatePersistentProfile, updateSiteSettings, userIdFromAccessToken, writeAdminAuditLog } from "./persistence.js";
 import { runPersistentVerificationCycle } from "./persistent-worker.js";
 import { checkLeetCodeUser, leetcodeRateLimitRemainingMs } from "./leetcode.js";
 
@@ -58,6 +58,17 @@ async function launchOpen(req: Request): Promise<boolean> {
 async function canVerifyWithHandle(profileId: string) {
   const profile = await getPersistentProfile(profileId);
   return profile?.role === "admin" || Boolean(profile?.leetcode_username?.trim());
+}
+
+// Once a season is archived the questions remain readable, but no attempt or
+// verification may create a new scored completion. Fail closed if the settings
+// cannot be read so an outage cannot quietly reopen scoring.
+async function seasonArchived(): Promise<boolean> {
+  try {
+    return (await getSiteSettings()).seasonEnded;
+  } catch {
+    return true;
+  }
 }
 
 router.get("/settings", async (_req, res) => {
@@ -134,6 +145,7 @@ router.post("/events/open", async (req, res) => {
   if (!await launchOpen(req)) return res.status(403).json({ error: "launch_not_open" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
   if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  if (await seasonArchived()) return res.status(409).json({ error: "season_ended" });
   if (!await canVerifyWithHandle(profileId)) return res.status(400).json({ error: "leetcode_username_required" });
   const challenge = await getPersistentChallenge(parsed.data.challengeId);
   if (!challenge) return res.status(404).json({ error: "challenge_not_found" });
@@ -148,6 +160,7 @@ router.post("/verification/request", async (req, res) => {
   if (!await launchOpen(req)) return res.status(403).json({ error: "launch_not_open" });
   const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
   if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  if (await seasonArchived()) return res.status(409).json({ error: "season_ended" });
   if (!await canVerifyWithHandle(profileId)) return res.status(400).json({ error: "leetcode_username_required" });
   await enqueuePersistentVerification(profileId, parsed.data.challengeId);
   // Kick off a verification cycle immediately so 1 accepted LeetCode
@@ -212,6 +225,36 @@ router.patch("/profile", async (req, res) => {
     if (owner) return res.status(409).json({ error: "leetcode_username_taken" });
   }
   return res.json({ profile: await updatePersistentProfile(profileId, updates) });
+});
+
+router.post("/season/feedback", async (req, res) => {
+  if (!persistenceEnabled) return res.status(503).json({ error: "persistence_not_configured" });
+  const profileId = await userIdFromAccessToken(authToken(req.header("authorization")));
+  if (!profileId) return res.status(401).json({ error: "authentication_required" });
+  const parsed = z.object({
+    wantSeasonTwo: z.enum(["yes", "maybe", "no"]),
+    rating: z.number().int().min(1).max(5).nullable().optional(),
+    liked: z.string().trim().max(2_000).optional(),
+    improvements: z.string().trim().max(4_000).optional(),
+    suggestions: z.string().trim().max(4_000).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_feedback" });
+  try {
+    const feedback = await createSeasonFeedback(profileId, parsed.data);
+    return res.status(201).json({ submitted: true, id: feedback.id, createdAt: feedback.created_at });
+  } catch {
+    return res.status(503).json({ error: "feedback_unavailable" });
+  }
+});
+
+router.get("/admin/season/feedback", async (req, res) => {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  try {
+    return res.json({ feedback: await getSeasonFeedback() });
+  } catch {
+    return res.status(503).json({ error: "feedback_unavailable" });
+  }
 });
 
 router.get("/leaderboard", async (req, res) => {
@@ -357,6 +400,7 @@ router.post("/admin/challenges/reorder", async (req, res) => {
 router.post("/admin/verification/start", async (req, res) => {
   const adminId = await requireAdmin(req, res);
   if (!adminId) return;
+  if (await seasonArchived()) return res.status(409).json({ error: "season_ended" });
   const parsed = z.object({ profileId: z.string().uuid(), challengeId: z.string().uuid() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "profileId_and_challengeId_are_required" });
   try {
@@ -372,6 +416,7 @@ router.post("/admin/verification/start", async (req, res) => {
 router.post("/admin/verification/manual", async (req, res) => {
   const adminId = await requireAdmin(req, res);
   if (!adminId) return;
+  if (await seasonArchived()) return res.status(409).json({ error: "season_ended" });
   const parsed = z.object({ profileId: z.string().uuid(), challengeId: z.string().uuid(), submissionId: z.string().trim().min(1).max(200), submissionAt: z.string().trim().min(1) }).safeParse(req.body);
   if (!parsed.success || !Number.isFinite(Date.parse(parsed.data.submissionAt))) return res.status(400).json({ error: "valid_submission_details_are_required" });
   try {
@@ -387,6 +432,7 @@ router.post("/admin/verification/manual", async (req, res) => {
 router.post("/admin/verification/run", async (req, res) => {
   const adminId = await requireAdmin(req, res);
   if (!adminId) return;
+  if (await seasonArchived()) return res.status(409).json({ error: "season_ended" });
   try {
     const result = await runPersistentVerificationCycle();
     await writeAdminAuditLog(adminId, { action: "run_verification_cycle", status: "success", message: result.running ? "Verification cycle is already running" : `Verification cycle processed ${result.claimed} jobs`, metadata: result });
@@ -414,11 +460,15 @@ router.patch("/admin/settings", async (req, res) => {
     waitlistEnabled: z.boolean().optional(),
     message: z.string().trim().max(500).optional(),
     launchAt: z.string().trim().max(64).nullable().optional(),
+    seasonMode: z.enum(["auto", "ended", "live"]).optional(),
+    seasonLabel: z.string().trim().min(1).max(80).optional(),
   }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_settings" });
-  const patch: { waitlistEnabled?: boolean; message?: string; launchAt?: string | null } = {};
+  const patch: { waitlistEnabled?: boolean; message?: string; launchAt?: string | null; seasonMode?: "auto" | "ended" | "live"; seasonLabel?: string } = {};
   if (parsed.data.waitlistEnabled !== undefined) patch.waitlistEnabled = parsed.data.waitlistEnabled;
   if (parsed.data.message !== undefined) patch.message = parsed.data.message;
+  if (parsed.data.seasonMode !== undefined) patch.seasonMode = parsed.data.seasonMode;
+  if (parsed.data.seasonLabel !== undefined) patch.seasonLabel = parsed.data.seasonLabel;
   if (parsed.data.launchAt !== undefined) {
     if (parsed.data.launchAt && !Number.isFinite(Date.parse(parsed.data.launchAt))) return res.status(400).json({ error: "invalid_launch_at" });
     patch.launchAt = parsed.data.launchAt ? new Date(parsed.data.launchAt).toISOString() : null;
